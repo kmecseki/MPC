@@ -7,6 +7,7 @@
 #include<fftw3.h>
 #include <string.h>
 #include <stdlib.h>
+#include <pthread.h>
 //#include <stdint.h>
 
 #define ZW0 377.0
@@ -30,9 +31,49 @@ void calcexpR(complex double *expR, int *signmem, double z, double Cav, double k
 void fftshift(complex double *in, int *dims, complex double *buffer, int axis);
 void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, complex double *tau_c, complex double *sigma_pla, complex double *freeelectrons);
 void calc1oes (double *BP, int *dims, double *r, double *vald1oes, double *y);
-void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char *gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change);
+//void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char *gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change);
+void *ssfmprop(void *ezmind);
 void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR2fft, fftw_plan *pR2ifft, fftw_plan *pTfft, fftw_plan *pTifft);
 void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err);
+
+struct ezmind {
+        double complex *sA;
+        int *sdims;
+        int ssst_on;
+        double sdzz;
+        double *sbetas;
+        double salpha;
+        int *ssignmem;
+        double sz;
+        double sCav;
+        double sk0;
+        double *swr;
+        fftw_plan spR1fft;
+        fftw_plan spR1ifft;
+        fftw_plan spR2fft;
+        fftw_plan spR2ifft;
+        fftw_plan spTfft;
+        fftw_plan spTifft;
+        double *sw;
+        double sgamma2;
+        double sw0;
+        int splasm;
+        double sdeltat;
+        char* sgas;
+        double srho_c;
+        double srho_nt;
+        double sn0;
+        double *spuls_e;
+        double *sr;
+        double *sBP1;
+        double *sBP2;
+        double *sy1;
+        double *sy2;
+        double *sbps1;
+        double *sbps2;
+        double sAb_M;
+        int schange;
+    };
 
 void main(int argc, char *argv[]) {
   
@@ -107,6 +148,7 @@ void main(int argc, char *argv[]) {
     double bps1 = 0.0, bps2 = 0.0;
     double y1[4], y2[4];
     double *BP1, *BP2;
+    pthread_t thread0, thread1;
         
     fread(dims, sizeof(int),3,fparp);
     printf("Matrix dimensions are: %d x %d x %d. \n", dims[0],dims[1],dims[2]);
@@ -168,21 +210,75 @@ void main(int argc, char *argv[]) {
     printf("Creating FFT plans...\n");
     createPlans(dims, &pR1fft, &pR1ifft, &pR2fft, &pR2ifft, &pTfft, &pTifft);
     printf("\bDone!\n");
+   
     
     err = 0;
     bad = 0;
     z = 0;
     signmem = 1;
+    
+    struct ezmind par1;
+    struct ezmind par2;
+    //par1.sA = 
+    par1.sdims = dims;
+    par1.ssst_on = sst_on;
+    //par1.sdzz = 
+    par1.sbetas = betas;
+    par1.salpha = alpha;
+    par1.ssignmem = &signmem;
+    par1.sz = z;
+    par1.sCav = Cav;
+    par1.sk0 = k0; 
+    par1.swr = wr;
+    par1.spR1fft = pR1fft;
+    par1.spR1ifft = pR1ifft;
+    par1.spR2fft = pR2fft;
+    par1.spR2ifft = pR2ifft;
+    par1.spTfft = pTfft;
+    par1.spTifft = pTifft;
+    par1.sw = w;
+    par1.sgamma2 = gamma2;
+    par1.sw0 = w0;
+    par1.splasm = plasm;
+    par1.sdeltat = deltat;
+    par1.sgas = gas;
+    par1.srho_c = rho_c;
+    par1.srho_nt = rho_nt;
+    par1.sn0 = n0;
+    par1.spuls_e = &puls_e;
+    par1.sr = r;
+    par1.sBP1 = BP1;
+    par1.sBP2 = BP2;
+    par1.sy1 = y1;
+    par1.sy2 = y2;
+    par1.sbps1 = &bps1;
+    par1.sbps2 = &bps2;
+    par1.sAb_M = Ab_M;
+    par1.schange = 0;
+    
+    
     // Assuming badapt is always ON & symmetric SSFM
     while (z<dist) {
         memcpy(C1, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));   
         memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
-      //ssfmprop(A, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0);
-        ssfmprop(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0);
-        ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0);
-        ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1);
+        par1.sA = C1;
+        par1.sdzz = 2*dzz;
+        pthread_create(&thread0, NULL, ssfmprop, &par1);
+        //ssfmprop(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0);
+        //ssfmprop(&par1);
+        memcpy(&par2, &par1, sizeof(struct ezmind));
+        par2.sA = C2;
+        par2.sdzz = dzz;
+        pthread_create(&thread1, NULL, ssfmprop, &par2);
+        //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0);
+        //ssfmprop(&par2);
+        pthread_join(thread1, NULL);
+        par2.schange = 1;
+        //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1);
+        ssfmprop(&par2);
+        pthread_join(thread0, NULL);
         setStep(dims, &dzz, C1, C2, def_err, dzmin, y1, y2, &bad, &err);
-        //printf("kuku=%g\n",y1[1]+y2[1]/2.0);
+        
        if (dr>(y1[1]+y2[1])/2.0) {
             printf("ERROR Rdim too small, nonlinear effects pull the beam too small for this resolution.\n ");
             exit(0);
@@ -287,7 +383,45 @@ free(BP2);
 }        
         
    
-void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char* gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change) {
+//void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char* gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change) {   
+void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char* gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change) {
+    struct ezmind par= *(struct ezmind *) ppar;
+    double complex *A = par.sA;
+    int *dims = par.sdims;
+    int sst_on = par.ssst_on;
+    double dzz = par.sdzz;
+    double *betas = par.sbetas;
+    double alpha = par.salpha;
+    int *signmem = par.ssignmem;
+    double z = par.sz;
+    double Cav = par.sCav;
+    double k0 = par.sk0;
+    double *wr = par.swr;
+    fftw_plan pR1fft = par.spR1fft;
+    fftw_plan pR1ifft = par.spR1ifft;
+    fftw_plan pR2fft = par.spR2fft;
+    fftw_plan pR2ifft = par.spR2ifft;
+    fftw_plan pTfft = par.spTfft;
+    fftw_plan pTifft = par.spTifft;
+    double *w = par.sw;
+    double gamma2 = par.sgamma2;
+    double w0 = par.sw0;
+    int plasm = par.splasm;
+    double deltat = par.sdeltat;
+    char* gas = par.sgas;
+    double rho_c = par.srho_c;
+    double rho_nt = par.srho_nt;
+    double n0 = par.sn0;
+    double *puls_e = par.spuls_e;
+    double *r = par.sr;
+    double *BP1 = par.sBP1;
+    double *BP2 = par.sBP2;
+    double *y1 = par.sy1;
+    double *y2 = par.sy2;
+    double *bps1 = par.sbps1;
+    double *bps2 = par.sbps2;
+    double Ab_M = par.sAb_M;
+    int change = par.schange;
     
     int i, j, k;
     int signum;
