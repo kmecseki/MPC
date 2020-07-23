@@ -208,6 +208,8 @@ void main(int argc, char *argv[]) {
     printf("\bDone!\n");
     
     printf("Creating FFT plans...\n");
+    fftw_init_threads();
+    fftw_plan_with_nthreads(8);
     createPlans(dims, &pR1fft, &pR1ifft, &pR2fft, &pR2ifft, &pTfft, &pTifft);
     printf("\bDone!\n");
    
@@ -366,7 +368,8 @@ fftw_destroy_plan(pR2fft);
 fftw_destroy_plan(pR2ifft);
 fftw_destroy_plan(pTfft);
 fftw_destroy_plan(pTifft);
-fftw_cleanup();   
+fftw_cleanup(); 
+fftw_cleanup_threads();
 
 free(A);
 free(C1);
