@@ -35,6 +35,34 @@ void calc1oes (double *BP, int *dims, double *r, double *vald1oes, double *y);
 void *ssfmprop(void *ezmind);
 void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR2fft, fftw_plan *pR2ifft, fftw_plan *pTfft, fftw_plan *pTifft);
 void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err);
+void *mult(void *inp);
+void *PexpR(void *inp);
+//void test(int *dims, complex double *A, double dzz, complex double *A_nl);
+//void test2(int *dims, complex double *exp_D0, double dzz, double *betas, double alpha);
+
+struct inpu {
+    double complex *sA;
+    double complex *sexpR;
+    int sdim1tol;
+    int sdim1ig;
+    int sdim2;
+    int sdim3;
+    int *sdims;
+    int schoo;
+};
+
+struct expo {
+    complex double *sexpR;
+    int *ssignmem;
+    double sz;
+    double sCav;
+    double sk0;
+    double sdzz;
+    double *swr;
+    int *sdims;
+    int sdimtol;
+    int sdimig;
+};
 
 struct ezmind {
         double complex *sA;
@@ -112,7 +140,7 @@ void main(int argc, char *argv[]) {
     //1. Read parameter file.
     FILE *fparp, *fmarp, *fmaip, *fbp1p, *fbp2p, *ftemp, *fspep, *fothp, *foutp;
     char fparn[40], fmarn[40], fmain[40], fbp1n[40], fbp2n[40], ftemn[40], fspen[40], fothn[40], foutn[40];
-    const char *cpath = "/tmp/tmp.PnJudwiP0l/"; 
+    const char *cpath = "/tmp/tmp.A4EplIZ4xJ/"; 
     
     snprintf(fparn, 40, "%s/%s", cpath, "param.bin"); 
     snprintf(fmarn, 40, "%s/%s", cpath, "datar.bin");
@@ -425,6 +453,13 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
     double *bps2 = par.sbps2;
     double Ab_M = par.sAb_M;
     int change = par.schange;
+    pthread_t thread0, thread1, thread2, thread3;
+    
+    struct inpu p1, p2, p3, p4;
+    struct expo ep1, ep2, ep3, ep4;
+    //struct inp p2;
+    //struct inp p3;
+   // struct inp p4;
     
     int i, j, k;
     int signum;
@@ -444,16 +479,50 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
     //printf("\bDone!\n");
     // Linear step - half step
     //printf("Linear step...\n");
+    //test2(dims, exp_D0, dzz, betas, alpha);
+    
     for (i=0; i<dims[2]; i++) {
+        //exp_D0[i] = exp(creal(dzz/2.0*(I*betas[i]-alpha/2.0)))*(cos(cimag(dzz/2.0*(I*betas[i]-alpha/2.0)))+I*sin(cimag(dzz/2.0*(I*betas[i]-alpha/2.0))));//
         exp_D0[i] = cexp(dzz/2.0*(I*betas[i]-alpha/2.0));
     }
     fftshift(exp_D0, dims, buffersmall, 0);
  
-    calcexpR(expR, signmem, z, Cav, k0, dzz/2, wr, dims); 
+    ep1.sexpR = expR;
+    ep1.ssignmem = signmem;
+    ep1.sz = z;
+    ep1.sCav = Cav;
+    ep1.sk0 = k0;
+    ep1.sdzz = dzz/2;
+    ep1.swr = wr;
+    ep1.sdims = dims;
+    ep1.sdimtol = 0;
+    ep1.sdimig = dims[0]/4;
+    memcpy(&ep2, &ep1, sizeof(struct expo));
+    ep2.sdimtol = dims[0]/4;
+    ep2.sdimig = dims[0]/2;
+    memcpy(&ep3, &ep1, sizeof(struct expo));
+    ep3.sdimtol = dims[0]/2;
+    ep3.sdimig = dims[0]*3/4;
+    memcpy(&ep4, &ep1, sizeof(struct expo));
+    ep4.sdimtol = dims[0]*3/4;
+    ep4.sdimig = dims[0];
+    pthread_create(&thread0, NULL, PexpR, &ep1);
+    pthread_create(&thread1, NULL, PexpR, &ep2);
+    pthread_create(&thread2, NULL, PexpR, &ep3);
+    pthread_create(&thread3, NULL, PexpR, &ep4);
+    pthread_join(thread0, NULL);
+    pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+    pthread_join(thread3, NULL);
+    
+    //calcexpR(expR, signmem, z, Cav, k0, dzz/2, wr, dims); //a fenti ezt helyettesiti csak parallel
+    
+    
+    
     //exit(0);
     //FILE *this1;
-    //this1 = fopen("/tmp/tmp.fSt7RsB2I8/elotte.bin","wb");
-    //fwrite(A, sizeof(double), 2*dims[2]*dims[1]*dims[0], this1);
+    //this1 = fopen("/tmp/tmp.A4EplIZ4xJ/expr.bin","wb");
+    //fwrite(expR, sizeof(double), 2*dims[0], this1);
     //fclose(this1);
     //exit(0);
     
@@ -468,20 +537,45 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
    //for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
    //     A[k] = A[k] / ((double) (dims[2]));
   //  } 
-    
-
-    
 
     //memcpy(temp, exp_D0, dims[2]* sizeof(complex double));   
     
     fftw_execute_dft(pR2fft, A, A);
-    for (k=0; k<dims[2]; k++) {
-        for (j=0; j<dims[1]; j++) {
-            for (i=0; i<dims[0]; i++) {
-                A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
-            }
-        }
-    }
+    
+    p1.sA = A;
+    p1.sexpR = expR;
+    p1.sdim1tol = 0;
+    p1.sdim1ig = dims[2]/4;
+    p1.sdim2 = dims[1];
+    p1.sdim3 = dims[0];
+    p1.sdims = dims;
+    p1.schoo = 1;
+    memcpy(&p2, &p1, sizeof(struct inpu));
+    p2.sdim1tol = dims[2]/4;
+    p2.sdim1ig = dims[2]/2;
+    memcpy(&p3, &p1, sizeof(struct inpu));
+    p3.sdim1tol = dims[2]/2;
+    p3.sdim1ig = dims[2]*3/4;
+    memcpy(&p4, &p1, sizeof(struct inpu));
+    p4.sdim1tol = dims[2]*3/4;
+    p4.sdim1ig = dims[2];
+    pthread_create(&thread0, NULL, mult, &p1);
+    pthread_create(&thread1, NULL, mult, &p2);
+    pthread_create(&thread2, NULL, mult, &p3);
+    pthread_create(&thread3, NULL, mult, &p4);
+    pthread_join(thread0, NULL);
+    pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+    pthread_join(thread3, NULL);
+    
+    
+    //for (k=0; k<dims[2]; k++) {
+    //    for (j=0; j<dims[1]; j++) {
+    //        for (i=0; i<dims[0]; i++) {
+    //            A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
+    //        }
+    //    }
+   // }
     fftw_execute_dft(pR2ifft, A, A);
     
    //     for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
@@ -489,13 +583,39 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
    //  }
     
     fftw_execute_dft(pR1fft, A, A);
-    for (k=0; k<dims[2]; k++) {
-        for (j=0; j<dims[1]; j++) {
-            for (i=0; i<dims[0]; i++) {
-                A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[i]);
-            }
-        }
-    }
+    p1.sA = A;
+    p1.sexpR = expR;
+    p1.sdim1tol = 0;
+    p1.sdim1ig = dims[2]/4;
+    p1.sdim2 = dims[1];
+    p1.sdim3 = dims[0];
+    p1.sdims = dims;
+    p1.schoo = 2;
+    memcpy(&p2, &p1, sizeof(struct inpu));
+    p2.sdim1tol = dims[2]/4;
+    p2.sdim1ig = dims[2]/2;
+    memcpy(&p3, &p1, sizeof(struct inpu));
+    p3.sdim1tol = dims[2]/2;
+    p3.sdim1ig = dims[2]*3/4;
+    memcpy(&p4, &p1, sizeof(struct inpu));
+    p4.sdim1tol = dims[2]*3/4;
+    p4.sdim1ig = dims[2];
+    pthread_create(&thread0, NULL, mult, &p1);
+    pthread_create(&thread1, NULL, mult, &p2);
+    pthread_create(&thread2, NULL, mult, &p3);
+    pthread_create(&thread3, NULL, mult, &p4);
+    pthread_join(thread0, NULL);
+    pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+    pthread_join(thread3, NULL);
+    
+   // for (k=0; k<dims[2]; k++) {
+   //     for (j=0; j<dims[1]; j++) {
+   //         for (i=0; i<dims[0]; i++) {
+   //             A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[i]);
+   //         }
+   //     }
+   // }
     fftw_execute_dft(pR1ifft, A, A);
      
   //    for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
@@ -565,9 +685,18 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
    }
    
    //mexPrintf("Ide el345346jutottunk256\n");
+   
+    
+    
+   //test(dims, A, dzz, A_nl);
+   
    for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-      A[i] = A[i] * cexp(dzz * A_nl[i]); 
+       //A[i] = A[i] * cexp(dzz * A_nl[i]); 
+       A[i] = A[i] * exp(creal(dzz * A_nl[i]))*(cos(cimag(dzz * A_nl[i]))+I*sin(cimag(dzz * A_nl[i])));
    }
+   
+   
+   
    //printf("\bDone!\n");
    //mexPrintf("Ide eljutottunk256\n");
     // Linear step - half step
@@ -587,26 +716,80 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
    
    
        fftw_execute_dft(pR2fft, A, A);
-   for (k=0; k<dims[2]; k++) {
-      for (j=0; j<dims[1]; j++) {
-            for (i=0; i<dims[0]; i++) {
-                A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
-            }
-       }
-   }
+       
+           p1.sA = A;
+    p1.sexpR = expR;
+    p1.sdim1tol = 0;
+    p1.sdim1ig = dims[2]/4;
+    p1.sdim2 = dims[1];
+    p1.sdim3 = dims[0];
+    p1.sdims = dims;
+    p1.schoo = 1;
+    memcpy(&p2, &p1, sizeof(struct inpu));
+    p2.sdim1tol = dims[2]/4;
+    p2.sdim1ig = dims[2]/2;
+    memcpy(&p3, &p1, sizeof(struct inpu));
+    p3.sdim1tol = dims[2]/2;
+    p3.sdim1ig = dims[2]*3/4;
+    memcpy(&p4, &p1, sizeof(struct inpu));
+    p4.sdim1tol = dims[2]*3/4;
+    p4.sdim1ig = dims[2];
+    pthread_create(&thread0, NULL, mult, &p1);
+    pthread_create(&thread1, NULL, mult, &p2);
+    pthread_create(&thread2, NULL, mult, &p3);
+    pthread_create(&thread3, NULL, mult, &p4);
+    pthread_join(thread0, NULL);
+    pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+    pthread_join(thread3, NULL);
+       
+ //  for (k=0; k<dims[2]; k++) {
+ //     for (j=0; j<dims[1]; j++) {
+ //           for (i=0; i<dims[0]; i++) {
+ //               A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
+ //           }
+ //      }
+ //  }
    fftw_execute_dft(pR2ifft, A, A);
    
   //      for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
   //    A[k] = A[k] / ((double) (dims[1]));
   //}
       fftw_execute_dft(pR1fft, A, A);
-   for (k=0; k<dims[2]; k++) {
-       for (j=0; j<dims[1]; j++) {
-           for (i=0; i<dims[0]; i++) {
-                A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[i]);
-            }
-       }
-   }
+      
+          p1.sA = A;
+    p1.sexpR = expR;
+    p1.sdim1tol = 0;
+    p1.sdim1ig = dims[2]/4;
+    p1.sdim2 = dims[1];
+    p1.sdim3 = dims[0];
+    p1.sdims = dims;
+    p1.schoo = 2;
+    memcpy(&p2, &p1, sizeof(struct inpu));
+    p2.sdim1tol = dims[2]/4;
+    p2.sdim1ig = dims[2]/2;
+    memcpy(&p3, &p1, sizeof(struct inpu));
+    p3.sdim1tol = dims[2]/2;
+    p3.sdim1ig = dims[2]*3/4;
+    memcpy(&p4, &p1, sizeof(struct inpu));
+    p4.sdim1tol = dims[2]*3/4;
+    p4.sdim1ig = dims[2];
+    pthread_create(&thread0, NULL, mult, &p1);
+    pthread_create(&thread1, NULL, mult, &p2);
+    pthread_create(&thread2, NULL, mult, &p3);
+    pthread_create(&thread3, NULL, mult, &p4);
+    pthread_join(thread0, NULL);
+    pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+    pthread_join(thread3, NULL);
+      
+  // for (k=0; k<dims[2]; k++) {
+  //     for (j=0; j<dims[1]; j++) {
+  //         for (i=0; i<dims[0]; i++) {
+  //              A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[i]);
+  //          }
+  //     }
+  // }
    fftw_execute_dft(pR1ifft, A, A);
      
   //   for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
@@ -668,6 +851,40 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
 
     
 }  
+
+void *mult(void *inp) {
+    int i, j, k;
+    struct inpu par= *(struct inpu *) inp;
+    double complex *A = par.sA;
+    double complex *expR = par.sexpR;
+    int dim1tol = par.sdim1tol;
+    int dim1ig = par.sdim1ig;
+    int dim2 = par.sdim2;
+    int dim3 = par.sdim3;
+    int *dims = par.sdims;
+    int choo = par.schoo;
+    
+    if (choo==1 ){
+        for (k=dim1tol; k<dim1ig; k++) {
+            for (j=0; j<dim2; j++) {
+                for (i=0; i<dim3; i++) {
+                    A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
+                }
+            }
+        }
+    }
+    
+    else if (choo==2) {
+        for (k=dim1tol; k<dim1ig; k++) {
+            for (j=0; j<dim2; j++) {
+                for (i=0; i<dim3; i++) {
+                    A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[i]);
+                }
+            }
+        }
+    }
+}
+        
 
 void ionizpot(const char* gas, double *I1, double *I2) {
     
@@ -908,11 +1125,13 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
 void calcexpR(complex double *expR, int *signmem, double z, double Cav, double k0, double dzz, double *wr, int *dims) {
     int signum, i;
     signum = (floor(z/Cav)+1 % 2)*2-1;
+    double K;
     //%signum1 = mod(floor(z/Cav/2)+1,2)*2-1; % add cyl later
     //%signum2 = mod(floor(z/Cav/2)+2,2)*2-1;
     if (-*signmem == signum) {
         *signmem = -*signmem;
     }
+    K = signum*(-I/(2.0*k0)*dzz*(-1.0));
     //complex double *temp1, *temp2;
     //temp1 = (complex double *)calloc(dims[0], sizeof(complex double));
     //temp2 = (complex double *)calloc(dims[0], sizeof(complex double));
@@ -921,7 +1140,8 @@ void calcexpR(complex double *expR, int *signmem, double z, double Cav, double k
     //    temp1[i] = signum*(-I/(2.0*k0)*dzz*(-1.0))
     
     for (i=0; i<dims[0]; i++) {
-        expR[i] = cexp(signum*(-I/(2.0*k0)*dzz*(-1.0))*pow(wr[i]-(wr[dims[1]/2-1]+wr[dims[1]/2])/2.0,2)); // CHECK
+        expR[i] = cexp(signum*(-I/(2.0*k0)*dzz*(-1.0))*pow(wr[i]-(wr[dims[1]/2-1]+wr[dims[1]/2])/2.0,2)); // ERZTTT CHECK
+        //expR[i]=cexp(K*pow(wr[i]-(wr[dims[1]/2-1]+wr[dims[1]/2])/2.0,2));
         //expR = exp(signum*(-1i/(2.0*k0)*dzz*-1.0)*(wr-(wr(Rdim/2)+wr(Rdim/2+1))/2)'.^2);
     }
                     //mexPrintf("exp1 = %g\n", signum*(-1/(2.0*k0)*dzz*(-1.0)));
@@ -932,8 +1152,31 @@ void calcexpR(complex double *expR, int *signmem, double z, double Cav, double k
    // fclose(this);
    // exit(0);
     //printf("Exitingggggg");
-    
+}
 
+void *PexpR(void *inp) {
+    struct expo par= *(struct expo *) inp;
+    double complex *expR = par.sexpR;
+    int *signmem = par.ssignmem;
+    double z = par.sz;
+    double Cav = par.sCav;
+    double k0 = par.sk0;
+    double dzz = par.sdzz;
+    double *wr = par.swr;
+    int *dims = par.sdims;
+    int dimtol = par.sdimtol;
+    int dimig = par.sdimig;
+    
+    int signum, i;
+    signum = (floor(z/Cav)+1 % 2)*2-1;
+    if (-*signmem == signum) {
+        *signmem = -*signmem;
+    }
+    //printf("dims[1]:%d\n",dims[1]);
+    for (i=dimtol; i<dimig; i++) {
+        expR[i] = cexp(signum*(-I/(2.0*k0)*dzz*(-1.0))*pow(wr[i]-(wr[dims[1]/2-1]+wr[dims[1]/2])/2.0,2)); // ERZTTT CHECK
+    }
+    //printf("expr[256]:%f\n",expR[256]);
 }
 
 void fftshift(complex double *in, int *dims, complex double *buffer, int axis) {
@@ -1175,3 +1418,18 @@ void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, dou
     }
     //exit(0);
 }
+
+/*void test(int *dims, complex double *A, double dzz, complex double *A_nl) {
+   int i;
+   for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
+       A[i] = A[i] * cexp(dzz * A_nl[i]); 
+   } 
+    
+}
+
+void test2(int *dims, complex double *exp_D0, double dzz, double *betas, double alpha) {
+    int i;
+    for (i=0; i<dims[2]; i++) {
+        exp_D0[i] = cexp(dzz/2.0*(I*betas[i]-alpha/2.0));
+    }
+}*/
