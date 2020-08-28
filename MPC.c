@@ -1,7 +1,4 @@
 #define _USE_MATH_DEFINES
-//#include <mex.h>
-//#include <matrix.h>
-//#include <time.h>
 #include <math.h>
 #include <complex.h>
 #include<fftw3.h>
