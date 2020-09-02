@@ -22,6 +22,7 @@
 #define T0 2.4188843265e-17    
 #define C0 300000000.0
 #define HBAR 1.054560652926899e-34
+#define PROC 12
 
 ///afs/slac/package/intel_tools/2015u2/bin/icc -o fullrun -lfftw3 fullcssfmrun.c
 
@@ -164,7 +165,7 @@ void main(int argc, char *argv[]) {
     
         
     char gas[9];
-    int i, k, dims[3];
+    int i, k, dims[3], nstep;
     int signmem, sst_on, plasm;
     int change, bad;
     double complex *A, *C1, *C2;
@@ -203,6 +204,7 @@ void main(int argc, char *argv[]) {
     fread(Ai, sizeof(double),dims[0]*dims[1]*dims[2],fmaip);
     fclose(fmaip);
     fclose(fmarp);
+    #pragma omp parallel for
     for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
         A[i] = Ar[i] + I*Ai[i];
     }
@@ -238,7 +240,7 @@ void main(int argc, char *argv[]) {
     
     printf("Creating FFT plans...\n");
     fftw_init_threads();
-    fftw_plan_with_nthreads(16);
+    fftw_plan_with_nthreads(PROC);
     createPlans(dims, &pR1fft, &pR1ifft, &pR2fft, &pR2ifft, &pTfft, &pTifft);
     printf("\bDone!\n");
    
@@ -247,6 +249,7 @@ void main(int argc, char *argv[]) {
     bad = 0;
     z = 0;
     signmem = 1;
+    nstep = 0;
     
     struct ezmind par1;
     struct ezmind par2;
@@ -290,8 +293,13 @@ void main(int argc, char *argv[]) {
     
     // Assuming badapt is always ON & symmetric SSFM
     while (z<dist) {
-        memcpy(C1, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));   
-        memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+                memcpy(C1, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
+            #pragma omp section
+                memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
+        }
         par1.sA = C1;
         par1.sdzz = 2*dzz;
         pthread_create(&thread0, NULL, ssfmprop, &par1);
@@ -346,35 +354,47 @@ void main(int argc, char *argv[]) {
     printf("Exited!.\n");
     
      */   
-   
+   //printf("Section 1...\n");
         z = z+2.0*dzz;
         memset(temp, 0, dims[2] * sizeof(double));
-        #pragma omp parallel for 
+        #pragma omp parallel
+        {
+            #pragma omp for
         for (k=0; k<dims[2]; k++) {
-            #pragma omp parallel for shared(temp, A) reduction(+: temp)
+            //#pragma omp parallel for shared(temp, A) reduction(+: temp)
             for (i=0; i<dims[1]*dims[0]; i++) {
                 temp[k] += A[k*dims[1]*dims[0]+i];
             }
             temp[k] = cabs(temp[k]);
         }
-        
+        }
+     // printf("Section 2...\n");  
         memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
         memset(spec, 0, dims[2] * sizeof(double));
         fftw_execute_dft(pTfft, C2, C2);    
-        fftshift(C2, dims, C1, 3);
+      //  printf("FFtshift next...\n");
+        //fftshift(C2, dims, C1, 3); % This was taking so long I took it out, we can do this in matlab.
+       // printf("Section 2.5...\n");
         #pragma omp parallel for
         for (k=0; k<dims[2]; k++) {
-            #pragma omp parallel for shared(spec, C2) reduction(+: spec)
+            //#pragma omp parallel for shared(spec, C2) reduction(+: spec)
             for (i=0; i<dims[1]*dims[0]; i++) {
                 spec[k] += C2[k*dims[1]*dims[0]+i];
             }
             spec[k] = cabs(spec[k]);
         }
-        
-        fwrite(BP1, sizeof(double), dims[1], fbp1p);
-        fwrite(BP2, sizeof(double), dims[1], fbp2p);
-        fwrite(temp, sizeof(double), dims[2], ftemp); 
-        fwrite(spec, sizeof(double), dims[2], fspep);
+       // printf("Section 3...\n");
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+                fwrite(BP1, sizeof(double), dims[1], fbp1p);
+            #pragma omp section
+                fwrite(BP2, sizeof(double), dims[1], fbp2p);
+            #pragma omp section
+                fwrite(temp, sizeof(double), dims[2], ftemp); 
+            #pragma omp section
+                fwrite(spec, sizeof(double), dims[2], fspep);
+        }
         fprintf(fothp, "%f\t%f\n", err, dzz);
         if (z>dist) {
             z = dist;
@@ -466,7 +486,7 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
     int signum;
     double complex *exp_D0, *buffersmall, *expR, *buffer2, *buffer, *dA, *A_nl;
     double complex *tau_c, *sigma_pla, *freeelectrons;
-    //printf("DEBUG: Allocating memory for ssfm...\n");
+    printf("DEBUG: Allocating memory for ssfm...\n");
     exp_D0 = (double complex*)malloc(dims[2] * sizeof(double complex));
     expR = (double complex*)malloc(dims[0] * sizeof(double complex));
     buffersmall = (complex double *)malloc(dims[2] * sizeof(complex double));
@@ -477,16 +497,20 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
     sigma_pla = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     freeelectrons = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     A_nl = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    //printf("\bDone!\n");
+    printf("\bDone!\n");
     // Linear step - half step
-    //printf("Linear step...\n");
+   // printf("Linear step...\n");
     //test2(dims, exp_D0, dzz, betas, alpha);
     #pragma omp parallel for 
         for (i=0; i<dims[2]; i++) {
             //exp_D0[i] = exp(creal(dzz/2.0*(I*betas[i]-alpha/2.0)))*(cos(cimag(dzz/2.0*(I*betas[i]-alpha/2.0)))+I*sin(cimag(dzz/2.0*(I*betas[i]-alpha/2.0))));//
             exp_D0[i] = cexp(dzz/2.0*(I*betas[i]-alpha/2.0));
         }
-    fftshift(exp_D0, dims, buffersmall, 0);
+   // printf("Calculating expR etc...\n");
+    #pragma omp parallel sections
+    {
+        #pragma omp section        
+            fftshift(exp_D0, dims, buffersmall, 0);
  /*
     ep1.sexpR = expR;
     ep1.ssignmem = signmem;
@@ -516,25 +540,26 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
     pthread_join(thread2, NULL);
     pthread_join(thread3, NULL);
    */ 
-    calcexpR(expR, signmem, z, Cav, k0, dzz/2, wr, dims); //a fenti ezt helyettesiti csak parallel
     
-    
-    
+        #pragma omp section
+            calcexpR(expR, signmem, z, Cav, k0, dzz/2, wr, dims); //a fenti ezt helyettesiti csak parallel
+
     //exit(0);
     //FILE *this1;
     //this1 = fopen("/tmp/tmp.A4EplIZ4xJ/expr.bin","wb");
     //fwrite(expR, sizeof(double), 2*dims[0], this1);
     //fclose(this1);
     //exit(0);
-    
-    fftw_execute_dft(pTfft, A, A);
+        #pragma omp section
+            fftw_execute_dft(pTfft, A, A);
+    }
     #pragma omp parallel for collapse(2)
         for (k=0; k<dims[2]; k++) {
             for (i=0; i<dims[0]*dims[1]; i++) {
                 A[k*dims[0]*dims[1]+i] = A[k*dims[0]*dims[1]+i] * exp_D0[k];// * (double) dims[2]; // Removed conj!
             }
         }
-    
+    //printf("executing dft x2...\n");
     fftw_execute_dft(pTifft, A, A);
            
    //for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
@@ -572,6 +597,7 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
     pthread_join(thread3, NULL);
     
     */
+   // printf("Next is expR multip...\n");
     #pragma omp parallel for collapse(3) 
     for (k=0; k<dims[2]; k++) {
         for (j=0; j<dims[1]; j++) {
@@ -580,7 +606,7 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
             }
         }
     }
-    
+  //  printf("dft x 2...\n");
     fftw_execute_dft(pR2ifft, A, A);
     
    //     for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
@@ -615,6 +641,7 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
     pthread_join(thread2, NULL);
     pthread_join(thread3, NULL);
     */
+   // printf("expR again...\n");
     #pragma omp parallel for collapse(3) 
     for (k=0; k<dims[2]; k++) {
         for (j=0; j<dims[1]; j++) {
@@ -623,11 +650,13 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
             }
         }
     }
+   // printf("1 x dft...\n");
     fftw_execute_dft(pR1ifft, A, A);
      
   //    for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
    //    A[k] = A[k] / ((double) (dims[0]));
   // }
+  //  printf("Division to fix fftw...\n");
     #pragma omp parallel for  
     for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
         A[k] = A[k] / ((double) (dims[2]*dims[1]*dims[0]));
@@ -635,7 +664,7 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
      
    //printf("\bDone!\n");
     // Nonlinear step - full step 
-   //printf("Nonlinear step...\n");
+  // printf("Nonlinear step...\n");
        
    //            FILE *this3;
    // this3 = fopen("/tmp/tmp.fSt7RsB2I8/kozben.bin","wb");
@@ -644,7 +673,7 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
     
     
     if (sst_on == 1) {
-       
+       #pragma omp parallel for
        for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
            buffer2[i] = A[i];
        }
@@ -681,7 +710,7 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
    if (plasm == 1) {
        ioniz(A, dims, w0, deltat, gas, rho_c, w, rho_nt, n0, tau_c, sigma_pla, freeelectrons);
        double rho_pla;
-       #pragma omp parallel for  
+       #pragma omp parallel for private(rho_pla)
        for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
            rho_pla = rho_nt*freeelectrons[i];  
            A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0)-buffer[i] - (1.0 + I * w0 * tau_c[i]) * sigma_pla[i]/2.0 * rho_pla;
@@ -712,7 +741,7 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
    //printf("\bDone!\n");
    //mexPrintf("Ide eljutottunk256\n");
     // Linear step - half step
-   //printf("Linear step...\n");
+  // printf("Linear step...\n");
    fftw_execute_dft(pTfft, A, A);
    #pragma omp parallel for collapse(2)
    for (k=0; k<dims[2]; k++) {
@@ -841,7 +870,7 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
    if (change==1) {
        memset(BP1, 0, dims[2] * sizeof(double));
        memset(BP2, 0, dims[2] * sizeof(double));
-       #pragma omp parallel for collapse(3) 
+       //#pragma omp parallel for collapse(3) shared(BP1,BP2) reduction(+:BP1,BP2)
        for (i=0; i<dims[2]; i++) {
            for (j=0; j<dims[1]; j++) {
                for (k=0; k<dims[0]; k++) {
@@ -850,8 +879,13 @@ void *ssfmprop(void *ppar) { //double complex *A, int *dims, int sst_on, double 
                }
            }
        }
-       calc1oes(BP1, dims, r, bps1, y1);
-       calc1oes(BP2, dims, r, bps2, y2);
+       #pragma omp parallel sections
+       {
+           #pragma omp section
+               calc1oes(BP1, dims, r, bps1, y1);
+           #pragma omp section
+               calc1oes(BP2, dims, r, bps2, y2);
+       }
    }
    //printf("\bDone!\n");
    free(tau_c);
@@ -1090,7 +1124,7 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     }
     
     Natoms(gas, &Natm, &sigm_coll);
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for collapse(2) private(ve)
     for (k=0; k<dims[2]; k++) {
        for (i=0; i<dims[0]*dims[1]; i++) {
             ve = sqrt(2.0 * pow(EL0,2.0) * pow(E0[k*dims[0]*dims[1]+i],2.0) /(4.0*pow(ME,2.0) * pow(w[k]+w0,2.0))); // free electorn velocity in E-field 
@@ -1109,10 +1143,13 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     //for (int i=0; i<dims[1]*dims[0]; i++) {
     //    Rateint[i] = 0.0;
     //}
-    #pragma omp parallel for collapse(2)
+    
+    // CHECK IF THE FOLLOWING IS CORRECT (RACE CONDITOIN MIGHT BE A PROBLEM)
+    //#pragma omp parallel for collapse(2) shared(Rateint) reduction(+:Rateint)
     for (k=(int)dims[2]-1; k>=0; k--) {
         for (i=0; i<dims[0]*dims[1]; i++) {
             Rateint[i] = Rateint[i] + W_adk1[k*dims[0]*dims[1]+i]*Kon;
+            //#pragma omp barrier
             Rateint[i] = Rateint[i] + (1.0- (Rateint[i]))*W_ava1[k*dims[0]*dims[1]+i]*Kon;
             rate[k*dims[0]*dims[1]+i] = exp(-Rateint[i]); //cexp????
             ions1[(k+1)*dims[0]*dims[1]+i] = 1.0-rate[k*dims[0]*dims[1]+i]-ions2[k*dims[0]*dims[1]+i];
@@ -1215,15 +1252,20 @@ void fftshift(complex double *in, int *dims, complex double *buffer, int axis) {
     }            
     else {
         memcpy ( buffer, in, dims[0]*dims[1]*dims[2] * sizeof(complex double) );
-        #pragma omp parallel num_threads(16)   
+        #pragma omp parallel num_threads(PROC)   
         {
         if (axis==1) {
             #pragma omp parallel for collapse(3)
             for (k=0; k<dims[2]; k++) {
                 for (j=0; j<dims[1]; j++) {
                     for (i=0; i<(dims[0]/2); i++) {
-                        in[k*dims[0]*dims[1]+j*dims[0]+i] = buffer[k*dims[0]*dims[1]+j*dims[0]+dims[0]/2+i];
-                        in[k*dims[0]*dims[1]+j*dims[0]+dims[0]/2+i] = buffer[k*dims[0]*dims[1]+j*dims[0]+i];
+                        #pragma omp parallel sections
+                        {
+                        #pragma omp section
+                            in[k*dims[0]*dims[1]+j*dims[0]+i] = buffer[k*dims[0]*dims[1]+j*dims[0]+dims[0]/2+i];
+                        #pragma omp section
+                            in[k*dims[0]*dims[1]+j*dims[0]+dims[0]/2+i] = buffer[k*dims[0]*dims[1]+j*dims[0]+i];
+                        }
                     }
                 }
             }
@@ -1233,8 +1275,13 @@ void fftshift(complex double *in, int *dims, complex double *buffer, int axis) {
             for (k=0; k<dims[2]; k++) {
                 for (j=0; j<dims[1]/2; j++) {
                     for (i=0; i<(dims[0]); i++) {
-                        in[k*dims[0]*dims[1]+j*dims[0]+i] = buffer[k*dims[0]*dims[1]+(j+dims[1]/2)*dims[0]+i];
-                        in[k*dims[0]*dims[1]+(j+dims[1]/2)*dims[0]+i] = buffer[k*dims[0]*dims[1]+j*dims[0]+i];
+                        #pragma omp parallel sections
+                        {
+                        #pragma omp section
+                            in[k*dims[0]*dims[1]+j*dims[0]+i] = buffer[k*dims[0]*dims[1]+(j+dims[1]/2)*dims[0]+i];
+                        #pragma omp section
+                            in[k*dims[0]*dims[1]+(j+dims[1]/2)*dims[0]+i] = buffer[k*dims[0]*dims[1]+j*dims[0]+i];
+                        }
                     }
                 }
             }
@@ -1244,8 +1291,13 @@ void fftshift(complex double *in, int *dims, complex double *buffer, int axis) {
             for (k=0; k<dims[2]/2; k++) {
                 for (j=0; j<dims[1]; j++) {
                     for (i=0; i<(dims[0]); i++) {
-                        in[k*dims[0]*dims[1]+j*dims[0]+i] = buffer[(k+dims[2]/2)*dims[0]*dims[1]+j*dims[0]+i];
-                        in[(k+dims[2]/2)*dims[0]*dims[1]+j*dims[0]+i] = buffer[k*dims[0]*dims[1]+j*dims[0]+i];
+                        #pragma omp parallel sections
+                        {
+                        #pragma omp section
+                            in[k*dims[0]*dims[1]+j*dims[0]+i] = buffer[(k+dims[2]/2)*dims[0]*dims[1]+j*dims[0]+i];
+                        #pragma omp section
+                            in[(k+dims[2]/2)*dims[0]*dims[1]+j*dims[0]+i] = buffer[k*dims[0]*dims[1]+j*dims[0]+i];
+                        }
                     }
                 }
             }
@@ -1325,10 +1377,10 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    howmany_dims[1].is =  dims[1]*dims[0];
    howmany_dims[1].os=  dims[1]*dims[0];
         
-   //*pR1fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
-   //*pR1ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
-   *pR1fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_PATIENT);
-   *pR1ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_PATIENT);
+   *pR1fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
+   *pR1ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
+   //*pR1fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_PATIENT);
+   //*pR1ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_PATIENT);
    
    dim[0].n = dims[1];
    dim[0].is =  dims[0];
@@ -1341,10 +1393,10 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    howmany_dims[1].is =  dims[1]*dims[0];
    howmany_dims[1].os=  dims[1]*dims[0];
    
-   //*pR2fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
-   //*pR2ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
-   *pR2fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_PATIENT);
-   *pR2ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_PATIENT);
+   *pR2fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
+   *pR2ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
+   //*pR2fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_PATIENT);
+   //*pR2ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_PATIENT);
    
    dim[0].n = dims[2];
    dim[0].is =  dims[0]*dims[1];
@@ -1358,10 +1410,10 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    howmany_dims[1].os=  dims[0];
    //memcpy(buffer, A, dims[2]*dims[1]*dims[0]* sizeof(complex double));
    //memcpy(temp, expR, dims[0]* sizeof(complex double));
-   //*pTfft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
-   //*pTifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
-   *pTfft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_PATIENT);
-   *pTifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_PATIENT);
+   *pTfft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
+   *pTifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
+   //*pTfft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_PATIENT);
+   //*pTifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_PATIENT);
    //pTfft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, A, A, FFTW_FORWARD, FFTW_ESTIMATE);
    //pTifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, A, A, FFTW_BACKWARD, FFTW_ESTIMATE);
 }
@@ -1403,7 +1455,7 @@ void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, dou
     //    sum1 += pow(cabs(mC2[i]-mC1[i]), 2); 
     //    sum2 += pow(cabs(mC2[i]), 2); 
     //    } 
-    #pragma omp parallel for
+    #pragma omp parallel for default(shared) reduction(+:sum1, sum2)
     for (i = 0; i<dims[0]*dims[1]*dims[2]; i++) { 
         sum1 += pow(cabs(C2[i]-C1[i]), 2); 
         sum2 += pow(cabs(C2[i]), 2); 
