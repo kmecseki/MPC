@@ -18,7 +18,7 @@
 #define T0 2.4188843265e-17    
 #define C0 300000000.0
 #define HBAR 1.054560652926899e-34
-#define PROC 16
+#define PROC 12
 
 ////afs/slac/package/intel_tools/2015u2/bin/icc -o fullrun4 -O3 -lfftw3_threads -lfftw3 -lpthread -openmp source_code_name.c
 /// current wisdom created on psanagpu111
@@ -238,6 +238,7 @@ void main(int argc, char *argv[]) {
         //{        
         //    z=dist; //csak egy kor
         //}
+        exit(0);
     }
 
 fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], foutp);
@@ -283,7 +284,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
     exp_D0 = (double complex*)malloc(dims[2] * sizeof(double complex));
     expR = (double complex*)malloc(dims[0] * sizeof(double complex));
     buffersmall = (complex double *)malloc(dims[2] * sizeof(complex double));
-    buffer2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+    //buffer2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     dA = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     tau_c = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
@@ -363,7 +364,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
     if (sst_on == 1) {
     #pragma omp parallel for
        for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-           buffer2[i] = A[i];
+           buffer[i] = A[i];
        }
     
    // FILE *this3;
@@ -380,11 +381,11 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
             w[dims[2]/2+k] = wbuff[k];
         }
     free(wbuff);
-    fftw_execute_dft(pTfft, buffer2, buffer2);
+    fftw_execute_dft(pTfft, buffer, buffer);
     #pragma omp parallel for collapse(2)
     for (k=0; k<dims[2]; k++) {
            for (i=0; i<dims[0]*dims[1]; i++) {
-               dA[k*dims[0]*dims[1]+i] = -1.0*I * buffer2[k*dims[0]*dims[1]+i] * w[k]; //conj v no conj for w???
+               dA[k*dims[0]*dims[1]+i] = -1.0*I * buffer[k*dims[0]*dims[1]+i] * w[k]; //conj v no conj for w???
            }
     }
 
@@ -406,7 +407,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
 
        #pragma omp parallel for  
        for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-           buffer[i] = gamma2/w0*(2.0*dA[i]*conj(A[i])+A[i]*conj(dA[i]));
+           buffer[i] = gamma2/w0*(2.0*dA[i]*conj(A[i])+A[i]*conj(dA[i])); //Using buffer for a new thing, different than before, to save memory
        }
        
    }
@@ -540,7 +541,6 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
    free(freeelectrons);
    free(A_nl);
    free(buffer);
-   free(buffer2);
    free(dA);
    free(exp_D0);
    free(expR);
@@ -932,10 +932,31 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    fftw_iodim64 *howmany_dims=malloc(2*sizeof(fftw_iodim64));
        if(howmany_dims==NULL){fprintf(stderr,"malloc failed\n");exit(1);}
    int howmany_rank;
+   //int readnotwrite;
    
    //Reading in wisdom - comment out for new wisdom and reinstate the end of this function
-   const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom";
+   /*
+   if (dims[0]==512) {
+       const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom512";
+       printf("Reading 512 wisdom.\n");
+       readnotwrite = 0;
+       fftw_import_wisdom_from_filename(bop);
+   }
+   else if (dims[0]==1024) {
+       const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom1024";
+       printf("Reading 1024 wisdom.\n");
+       readnotwrite = 0;
+       fftw_import_wisdom_from_filename(bop);
+   }
+   else {
+       readnotwrite = 1;
+       printf("Wisdom does not exist, creating one.\n");
+   }
+    */
+   const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom512";
    fftw_import_wisdom_from_filename(bop);
+   
+   
    
    buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
    
@@ -991,10 +1012,14 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    //pTifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, A, A, FFTW_BACKWARD, FFTW_ESTIMATE);
    
    //Write out wisdom, uncomment for new hardware.
+   //if (readnotwrite==1)
    //const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom1024";
    //fftw_export_wisdom_to_filename(bop);
    //exit(0);
    //
+   free(buffer);
+   free(dim);
+   free(howmany_dims);
 }
 
 void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err) {
