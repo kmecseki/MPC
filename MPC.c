@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <omp.h>
+#include <time.h>
 
 #define ZW0 377.0
 #define NC 1.0  // refractive index (set to 1)
@@ -238,7 +239,7 @@ void main(int argc, char *argv[]) {
         //{        
         //    z=dist; //csak egy kor
         //}
-        exit(0);
+      //  exit(0);
     }
 
 fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], foutp);
@@ -324,20 +325,20 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
              
     fftw_execute_dft(pR2fft, A, A);
     
-    #pragma omp parallel for collapse(3) 
+    #pragma omp simd collapse(3) 
     for (k=0; k<dims[2]; k++) {
         for (j=0; j<dims[1]; j++) {
             for (i=0; i<dims[0]; i++) {
                 A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
             }
         }
-    }
-
+    }  
+    
     fftw_execute_dft(pR2ifft, A, A);
     
     fftw_execute_dft(pR1fft, A, A);
     
-    #pragma omp parallel for collapse(3) 
+    #pragma omp simd collapse(3) 
     for (k=0; k<dims[2]; k++) {
         for (j=0; j<dims[1]; j++) {
             for (i=0; i<dims[0]; i++) {
@@ -345,7 +346,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
             }
         }
     }
-
+    
     fftw_execute_dft(pR1ifft, A, A);
     
     #pragma omp parallel for  
@@ -453,7 +454,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
 
    fftw_execute_dft(pR2fft, A, A);
 
-   #pragma omp parallel for collapse(3)
+   #pragma omp simd collapse(3)
    for (k=0; k<dims[2]; k++) {
       for (j=0; j<dims[1]; j++) {
             for (i=0; i<dims[0]; i++) {
@@ -466,7 +467,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
    
    fftw_execute_dft(pR1fft, A, A);
 
-  #pragma omp parallel for collapse(3)
+  #pragma omp simd collapse(3)
    for (k=0; k<dims[2]; k++) {
        for (j=0; j<dims[1]; j++) {
            for (i=0; i<dims[0]; i++) {
@@ -668,19 +669,8 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     Ip = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     E0 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     datpuls = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-    Iion = (double *)malloc(2 * sizeof(double));
-    nq = (double *)malloc(2 * sizeof(double));
-    f_lm = (double *)malloc(2 * sizeof(double));
-    lq = (double *)malloc(2 * sizeof(double));
-    mq = (double *)malloc(2 * sizeof(double));
-    C_nl = (double *)malloc(2 * sizeof(double));
     W_adk1 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     W_adk2 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-    W_ava1 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-    Rateint = (double *)calloc(dims[0]*dims[1], sizeof(double));
-    rate = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-    ions1 = (double *)calloc((dims[0]*dims[1]*(dims[2]+1)), sizeof(double));
-    ions2 = (double *)calloc((dims[0]*dims[1]*(dims[2]+1)), sizeof(double));
         
     #pragma omp parallel for private(i)
     for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
@@ -703,6 +693,13 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     
     /* Ionization rates */
 
+    Iion = (double *)malloc(2 * sizeof(double));
+    nq = (double *)malloc(2 * sizeof(double));
+    f_lm = (double *)malloc(2 * sizeof(double));
+    lq = (double *)malloc(2 * sizeof(double));
+    mq = (double *)malloc(2 * sizeof(double));
+    C_nl = (double *)malloc(2 * sizeof(double));
+    
     ionizpot(gas, &I1, &I2);
     Iion[0] = I1/IH;
     Iion[1] = I2/IH;
@@ -721,6 +718,14 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     C_nl[1] = sqrt(pow(2.0,nq[1]) * pow(nq[1] * tgamma(nq[1]+lq[1]+1.0) * tgamma(nq[1]-lq[1]),-1.0));
     
     ADK(W_adk1, W_adk2, dims, C_nl, f_lm, nq, mq, Iion, datpuls);
+    free(Iion);
+    free(datpuls);
+    free(nq);
+    free(f_lm);
+    free(lq);
+    free(mq);
+    free(C_nl);
+    
     #pragma omp parallel for
     for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
         if isnan(W_adk1[i]) {
@@ -730,7 +735,7 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
             W_adk2[i] = 0.0;
         }
     }
-    
+    W_ava1 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));    
     Natoms(gas, &Natm, &sigm_coll);
     #pragma omp parallel for collapse(2) private(ve)
     for (k=0; k<dims[2]; k++) {
@@ -742,11 +747,16 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
        }
     }
     
+    free(Ip);
+    free(E0);
     
     //for (int i=0; i<dims[1]*dims[0]; i++) {
     //    Rateint[i] = 0.0;
     //}
     
+    Rateint = (double *)calloc(dims[0]*dims[1], sizeof(double));
+    ions1 = (double *)calloc((dims[0]*dims[1]*(dims[2]+1)), sizeof(double));
+    ions2 = (double *)calloc((dims[0]*dims[1]*(dims[2]+1)), sizeof(double));
     // CHECK IF THE FOLLOWING IS CORRECT (RACE CONDITOIN MIGHT BE A PROBLEM)
     //#pragma omp parallel for collapse(2) shared(Rateint) reduction(+:Rateint)
     for (k=(int)dims[2]-1; k>=0; k--) {
@@ -754,31 +764,22 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
             Rateint[i] = Rateint[i] + W_adk1[k*dims[0]*dims[1]+i]*Kon;
             //#pragma omp barrier
             Rateint[i] = Rateint[i] + (1.0- (Rateint[i]))*W_ava1[k*dims[0]*dims[1]+i]*Kon;
-            rate[k*dims[0]*dims[1]+i] = exp(-Rateint[i]); //cexp????
-            ions1[(k+1)*dims[0]*dims[1]+i] = 1.0-rate[k*dims[0]*dims[1]+i]-ions2[k*dims[0]*dims[1]+i];
+           // rate[k*dims[0]*dims[1]+i] = exp(-Rateint[i]); // Removed rate completely
+            ions1[(k+1)*dims[0]*dims[1]+i] = 1.0-exp(-Rateint[i])-ions2[k*dims[0]*dims[1]+i];
             ions2[(k+1)*dims[0]*dims[1]+i] = ions2[k*dims[0]*dims[1]+i]+ (W_adk2[k*dims[0]*dims[1]+i])*Kon*ions1[k*dims[0]*dims[1]+i];
         }
     }
+    
+    free(Rateint);
+    free(W_ava1);
+    free(W_adk1);
+    free(W_adk2);
     
     #pragma omp parallel for
     for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
         freeelectrons[i] = ions1[i]*1.0+ions2[i]*2.0;
     }
    
-    free(Ip);
-    free(E0);
-    free(datpuls);
-    free(Iion);
-    free(nq);
-    free(f_lm);
-    free(lq);
-    free(mq);
-    free(C_nl);
-    free(W_adk1);
-    free(W_adk2);
-    free(W_ava1);
-    free(Rateint);
-    free(rate);
     free(ions1);
     free(ions2);
 }
