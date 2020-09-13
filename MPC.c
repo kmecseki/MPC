@@ -30,7 +30,7 @@ void ADK(double *ionizationrates1, double *ionizationrates2, int *dims, double *
 void Natoms(const char *gas, double *Natm, double *sigm_coll); 
 void calcexpR(complex double *expR, int *signmem, double z, double Cav, double k0, double dzz, double *wr, int *dims);
 void fftshift(complex double *in, int *dims, complex double *buffer, int axis);
-void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, complex double *tau_c, complex double *sigma_pla, double *freeelectrons);
+void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, double *tau_c, double *freeelectrons);
 void calc1oes (double *BP, int *dims, double *r, double *vald1oes, double *y);
 void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char *gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change);
 void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR2fft, fftw_plan *pR2ifft, fftw_plan *pTfft, fftw_plan *pTifft);
@@ -239,7 +239,7 @@ void main(int argc, char *argv[]) {
         //{        
         //    z=dist; //csak egy kor
         //}
-      //  exit(0);
+        //exit(0);
     }
 
 fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], foutp);
@@ -278,9 +278,9 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
    
     int i, j, k;
     int signum;
-    double *freeelectrons;
+    double *freeelectrons_sp;
     double complex *exp_D0, *buffersmall, *expR, *buffer2, *buffer, *dA, *A_nl;
-    double complex *tau_c, *sigma_pla;
+    double *tau_c;
     //printf("DEBUG: Allocating memory for ssfm...\n");
     exp_D0 = (double complex*)malloc(dims[2] * sizeof(double complex));
     expR = (double complex*)malloc(dims[0] * sizeof(double complex));
@@ -288,9 +288,8 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
     //buffer2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     dA = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    tau_c = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    sigma_pla = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    freeelectrons = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+    tau_c = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+    freeelectrons_sp = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     A_nl = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     //printf("\bDone!\n");
     
@@ -417,12 +416,10 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
    }
    
    if (plasm == 1) {
-       ioniz(A, dims, w0, deltat, gas, rho_c, w, rho_nt, n0, tau_c, sigma_pla, freeelectrons);
-       double rho_pla;
-      #pragma omp parallel for private(rho_pla)
-       for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-           rho_pla = rho_nt*freeelectrons[i];  
-           A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0)-buffer[i] - (1.0 + I * w0 * tau_c[i]) * sigma_pla[i]/2.0 * rho_pla;
+       ioniz(A, dims, w0, deltat, gas, rho_c, w, rho_nt, n0, tau_c, freeelectrons_sp);
+      #pragma omp parallel for
+       for (i=0; i<dims[0]*dims[1]*dims[2]; i++) { 
+           A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0)-buffer[i] - (1.0 + I * w0 * tau_c[i]) * rho_nt * freeelectrons_sp[i]/2.0;
        }
   
    }
@@ -538,8 +535,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
 
    //printf("SSFM Done!\n");
    free(tau_c);
-   free(sigma_pla);
-   free(freeelectrons);
+   free(freeelectrons_sp);
    free(A_nl);
    free(buffer);
    free(dA);
@@ -655,7 +651,7 @@ if (strcmp(gas,"Krypton")==0) {
 } 
 
 
-void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, complex double *tau_c, complex double *sigma_pla, double *freeelectrons) {
+void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, double *tau_c, double *freeelectrons_sp) {
 
     int i, k;
     double *Ip;
@@ -664,7 +660,7 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     double I1, I2, ve;
     double *W_adk1, *W_adk2, *W_ava1, *Rateint;
     double Natm, sigm_coll;
-    double *rate, *ions1, *ions2;
+    double *rate, *ions1, *ions2, *sigma_pla;
             
     Ip = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     E0 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
@@ -735,7 +731,8 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
             W_adk2[i] = 0.0;
         }
     }
-    W_ava1 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));    
+    W_ava1 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+    sigma_pla = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));    
     Natoms(gas, &Natm, &sigm_coll);
     #pragma omp parallel for collapse(2) private(ve)
     for (k=0; k<dims[2]; k++) {
@@ -777,9 +774,10 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     
     #pragma omp parallel for
     for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
-        freeelectrons[i] = ions1[i]*1.0+ions2[i]*2.0;
+        freeelectrons_sp[i] = (ions1[i]*1.0+ions2[i]*2.0)*sigma_pla[i];
     }
    
+    free(sigma_pla);
     free(ions1);
     free(ions2);
 }
