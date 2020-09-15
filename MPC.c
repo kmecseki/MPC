@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <omp.h>
 #include <time.h>
+#include <mpi.h>
 
 #define ZW0 377.0
 #define NC 1.0  // refractive index (set to 1)
@@ -22,6 +23,7 @@
 #define PROC 12
 
 ////afs/slac/package/intel_tools/2015u2/bin/icc -o fullrun4 -O3 -lfftw3_threads -lfftw3 -lpthread -openmp source_code_name.c
+////mpicc -o MCPSim -O3 -lm -lfftw3_threads -lfftw3 -lpthread MPC_code_v20200915MPI.c
 /// current wisdom created on psanagpu111
 
 
@@ -32,11 +34,22 @@ void calcexpR(complex double *expR, int *signmem, double z, double Cav, double k
 void fftshift(complex double *in, int *dims, complex double *buffer, int axis);
 void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, double *tau_c, double *freeelectrons);
 void calc1oes (double *BP, int *dims, double *r, double *vald1oes, double *y);
-void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char *gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change);
+void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char *gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change, int mpirank);
 void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR2fft, fftw_plan *pR2ifft, fftw_plan *pTfft, fftw_plan *pTifft);
 void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err);
 
 void main(int argc, char *argv[]) {
+    
+    //MPI_Init(&argc, &argv);
+    int provided;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
+    if (provided != MPI_THREAD_FUNNELED) {
+        fprintf(stderr, "Warning MPI did not provide MPI_THREAD_FUNNELED\n");
+        exit(0);
+    }
+    int mpisize, mpirank;
+    MPI_Comm_size(MPI_COMM_WORLD, &mpisize);
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpirank);
     
     //1. Read parameter file.
     FILE *fparp, *fmarp, *fmaip, *fbp1p, *fbp2p, *ftemp, *fspep, *fothp, *foutp;
@@ -163,9 +176,9 @@ void main(int argc, char *argv[]) {
                 memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
         }
         
-        ssfmprop(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0);
-        ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0);
-        ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1);
+        ssfmprop(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
+        ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
+        ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1, mpirank);
 
         setStep(dims, &dzz, C1, C2, def_err, dzmin, y1, y2, &bad, &err);
 
@@ -271,10 +284,12 @@ free(r);
 free(BP1);
 free(BP2);
 
+MPI_Finalize();
+
 }        
         
    
-void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char* gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change) {   
+void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char* gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change, int mpirank) {   
    
     int i, j, k;
     int signum;
@@ -288,8 +303,6 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
     //buffer2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     dA = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    tau_c = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-    freeelectrons_sp = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     A_nl = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     //printf("\bDone!\n");
     
@@ -416,11 +429,45 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
    }
    
    if (plasm == 1) {
-       ioniz(A, dims, w0, deltat, gas, rho_c, w, rho_nt, n0, tau_c, freeelectrons_sp);
-      #pragma omp parallel for
-       for (i=0; i<dims[0]*dims[1]*dims[2]; i++) { 
-           A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0)-buffer[i] - (1.0 + I * w0 * tau_c[i]) * rho_nt * freeelectrons_sp[i]/2.0;
+       if (mpirank == 0) {
+           MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(dims, 3, MPI_INT, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(&w0, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(&deltat, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(gas, 9, MPI_CHAR, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(&rho_c, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(w, dims[2], MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(&rho_nt, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(&n0, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(&tau_c, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+           MPI_Send(freeelectrons_sp, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD);
+           MPI_Recv(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
        }
+       
+       if (mpirank == 1) {
+           tau_c = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+           freeelectrons_sp = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+           MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(dims, 3, MPI_INT, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(&w0, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(&deltat, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(gas, 9, MPI_CHAR, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(&rho_c, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(w, dims[2], MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(&rho_nt, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(&n0, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(&tau_c, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           MPI_Recv(freeelectrons_sp, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+           ioniz(A, dims, w0, deltat, gas, rho_c, w, rho_nt, n0, tau_c, freeelectrons_sp);
+           #pragma omp parallel for
+           for (i=0; i<dims[0]*dims[1]*dims[2]; i++) { 
+               A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0)-buffer[i] - (1.0 + I * w0 * tau_c[i]) * rho_nt * freeelectrons_sp[i]/2.0;
+           }
+           MPI_Send(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD);
+           free(tau_c);
+           free(freeelectrons_sp);
+       }
+
   
    }
    else {
@@ -534,8 +581,6 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
    // exit(0);
 
    //printf("SSFM Done!\n");
-   free(tau_c);
-   free(freeelectrons_sp);
    free(A_nl);
    free(buffer);
    free(dA);
@@ -934,26 +979,26 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    //int readnotwrite;
    
    //Reading in wisdom - comment out for new wisdom and reinstate the end of this function
-   /*
+   
    if (dims[0]==512) {
        const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom512";
        printf("Reading 512 wisdom.\n");
-       readnotwrite = 0;
+     //  readnotwrite = 0;
        fftw_import_wisdom_from_filename(bop);
    }
    else if (dims[0]==1024) {
        const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom1024";
        printf("Reading 1024 wisdom.\n");
-       readnotwrite = 0;
+     //  readnotwrite = 0;
        fftw_import_wisdom_from_filename(bop);
    }
-   else {
-       readnotwrite = 1;
-       printf("Wisdom does not exist, creating one.\n");
-   }
-    */
-   const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom512";
-   fftw_import_wisdom_from_filename(bop);
+   //else {
+   //    readnotwrite = 1;
+   //    printf("Wisdom does not exist, creating one.\n");
+   //}
+   // */
+   //const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom512";
+   //fftw_import_wisdom_from_filename(bop);
    
    
    
