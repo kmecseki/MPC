@@ -20,7 +20,7 @@
 #define T0 2.4188843265e-17    
 #define C0 300000000.0
 #define HBAR 1.054560652926899e-34
-#define PROC 12
+#define PROC 16
 
 ////afs/slac/package/intel_tools/2015u2/bin/icc -o fullrun4 -O3 -lfftw3_threads -lfftw3 -lpthread -openmp source_code_name.c
 ////mpicc -o MCPSim -O3 -lm -lfftw3_threads -lfftw3 -lpthread MPC_code_v20200915MPI.c
@@ -42,6 +42,9 @@ void main(int argc, char *argv[]) {
     
     //MPI_Init(&argc, &argv);
     int provided;
+    int lgt;
+    lgt = 80;
+    double z;
     MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
     if (provided != MPI_THREAD_FUNNELED) {
         fprintf(stderr, "Warning MPI did not provide MPI_THREAD_FUNNELED\n");
@@ -50,67 +53,82 @@ void main(int argc, char *argv[]) {
     int mpisize, mpirank;
     MPI_Comm_size(MPI_COMM_WORLD, &mpisize);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpirank);
+    printf("Starting up! mpirank: %d\n",mpirank);
     
-    //1. Read parameter file.
-    FILE *fparp, *fmarp, *fmaip, *fbp1p, *fbp2p, *ftemp, *fspep, *fothp, *foutp;
-    char fparn[80], fmarn[80], fmain[80], fbp1n[80], fbp2n[80], ftemn[80], fspen[80], fothn[80], foutn[80];
-    //const char *cpath = "/tmp/tmp.A4EplIZ4xJ/"; 
     const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/"; 
     //const char *cpath = "/reg/neh/home/kmecseki/broad3/3Dfortest/3D/files/data/"; 
+    int dims[3];  
     
-    snprintf(fparn, 80, "%s/%s", cpath, "param.bin"); 
-    snprintf(fmarn, 80, "%s/%s", cpath, "datar.bin");
-    snprintf(fmain, 80, "%s/%s", cpath, "datai.bin");
-    snprintf(fbp1n, 80, "%s/%s", cpath, "bp1.bin");
-    snprintf(fbp2n, 80, "%s/%s", cpath, "bp2.bin");
-    snprintf(ftemn, 80, "%s/%s", cpath, "temp.bin");
-    snprintf(fspen, 80, "%s/%s", cpath, "spec.bin");
-    snprintf(fothn, 80, "%s/%s", cpath, "other.bin");
-    snprintf(foutn, 80, "%s/%s", cpath, "out.bin");
+    FILE *fparp;
+    char fparn[lgt];
     
+    snprintf(fparn, lgt, "%s/%s", cpath, "param.bin"); 
     fparp = fopen(fparn,"r");
-    fmarp = fopen(fmarn,"r");
-    fmaip = fopen(fmain,"r");
+    fread(dims, sizeof(int),3,fparp);
+        
+    FILE *fmarp, *fmaip, *fbp1p, *fbp2p, *ftemp, *fspep, *fothp, *foutp;
+    char fmarn[lgt], fmain[lgt], fbp1n[lgt], fbp2n[lgt], ftemn[lgt], fspen[lgt], fothn[lgt], foutn[lgt];
+    
+    double complex *C1, *C2;
+    
+  if (mpirank == 0) { 
+    printf("Matrix dimensions are: %d x %d x %d. \n", dims[0],dims[1],dims[2]);
+
+    C1 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+    C2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+    
+    //const char *cpath = "/tmp/tmp.A4EplIZ4xJ/"; 
+    snprintf(fbp1n, lgt, "%s/%s", cpath, "bp1.bin");
+    snprintf(fbp2n, lgt, "%s/%s", cpath, "bp2.bin");
+    snprintf(ftemn, lgt, "%s/%s", cpath, "temp.bin");
+    snprintf(fspen, lgt, "%s/%s", cpath, "spec.bin");
+    snprintf(fothn, lgt, "%s/%s", cpath, "other.bin");
+    snprintf(foutn, lgt, "%s/%s", cpath, "out.bin");
+    snprintf(fmarn, lgt, "%s/%s", cpath, "datar.bin");
+    snprintf(fmain, lgt, "%s/%s", cpath, "datai.bin");
+    
     fbp1p = fopen(fbp1n,"wb");
     fbp2p = fopen(fbp2n,"wb");
     ftemp = fopen(ftemn, "wb");
     fspep = fopen(fspen, "wb");
     fothp = fopen(fothn, "w");
     foutp = fopen(foutn, "wb");
-      
+    fmarp = fopen(fmarn,"r");
+    fmaip = fopen(fmain,"r");
+  }
+    
     char gas[9];
-    int i, k, dims[3], nstep;
+    double complex *A;
+    int i, k, nstep;
     int signmem, sst_on, plasm;
     int change, bad;
-    double complex *A, *C1, *C2;
-    double *Ar, *Ai;
+        
     double *betas, *wr, *w, *r, *temp, *spec;
     double dist, dzz, alpha, err, def_err, dzmin, dr;
-    double z, Cav, k0;
+    double Cav, k0;
     fftw_plan pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft;
     double gamma2, w0, deltat, rho_c, rho_nt, n0, puls_e, Ab_M;
     double bps1 = 0.0, bps2 = 0.0;
     double y1[4], y2[4];
     double *BP1, *BP2;
-        
-    fread(dims, sizeof(int),3,fparp);
-    printf("Matrix dimensions are: %d x %d x %d. \n", dims[0],dims[1],dims[2]);
     
-    printf("DEBUG: Allocating memory...\n");
+    if (mpirank == 0) {
+        printf("DEBUG: Allocating memory on all nodes...\n");
+    }
     A = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    Ar = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-    Ai = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-    C1 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    C2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    temp = (double *)malloc(dims[2] * sizeof(double));
-    spec = (double *)malloc(dims[2] * sizeof(double));
     betas = (double *)malloc(dims[2] * sizeof(double));
     wr = (double *)malloc(dims[1] * sizeof(double));
     w = (double *)malloc(dims[2] * sizeof(double));
     r = (double *)malloc(dims[1] * sizeof(double));
     BP1 = (double *)malloc(dims[0] * sizeof(double));
     BP2 = (double *)malloc(dims[0] * sizeof(double));
-    printf("\bDone!\n");
+    
+  if (mpirank == 0) { 
+    double *Ar, *Ai;
+    Ar = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+    Ai = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+    temp = (double *)malloc(dims[2] * sizeof(double));
+    spec = (double *)malloc(dims[2] * sizeof(double));
     
     printf("Now reading in data matrix...\n");
     fread(Ar, sizeof(double),dims[0]*dims[1]*dims[2],fmarp);
@@ -124,8 +142,11 @@ void main(int argc, char *argv[]) {
     free(Ar);
     free(Ai);
     printf("\bDone!\n");
-    
-    printf("Now reading in parameters...\n");
+      
+  }  
+    if (mpirank == 0) {
+        printf("Now reading in parameters...\n");
+    }
 
     fread(&dist, sizeof(double),1,fparp);
     fread(&dzz, sizeof(double),1,fparp);
@@ -153,115 +174,211 @@ void main(int argc, char *argv[]) {
     
     
     fclose(fparp);
-    printf("\bDone!\n");
-    
-    printf("Creating FFT plans...\n");
+    if (mpirank == 0) {
+        printf("\bDone!\n");
+    }
+    if (mpirank == 0) {
+        printf("Creating FFT plans...\n");
+    }
     fftw_init_threads();
     fftw_plan_with_nthreads(PROC);
     createPlans(dims, &pR1fft, &pR1ifft, &pR2fft, &pR2ifft, &pTfft, &pTifft);
-    printf("\bDone!\n");
-   
+    if (mpirank == 0) {
+        printf("\bDone!\n");
+    }
     
     err = 0;
-    bad = 0;
     z = 0;
+    bad = 0;
     signmem = 1;
     nstep = 0;
+   // printf("\bSending dims to nodes!\n");
+   // MPI_Send(dims, 3, MPI_INT, 1, 0, MPI_COMM_WORLD);
+   // MPI_Send(dims, 3, MPI_INT, 2, 0, MPI_COMM_WORLD);
+   // MPI_Send(dims, 3, MPI_INT, 3, 0, MPI_COMM_WORLD);
+   //
+   //else {
+   //  int node;
+   //  MPI_Comm_rank(MPI_COMM_WORLD, &node);
+   //  MPI_Recv(dims, 3, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+   //  printf("Receiving dims at %d, size: %dx%dx%d\n",node,dims[0],dims[1],dims[2]);     
+   //}
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (mpirank == 0) {
+        printf("\bAll nodes are ready, for loop is starting!\n");
+    }
+   // exit(0);
+   // return;
+    
+
     
     while (z<dist) {
         
-        #pragma omp parallel
-        {
-                memcpy(C1, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
-                memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
+      if (mpirank == 0) {
+        //#pragma omp parallel
+        //{
+        //        memcpy(C1, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
+        //        memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
+        //}
+          for (i=1;i<5;i++) {
+            MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, i, 0, MPI_COMM_WORLD);
+            MPI_Send(&dzz, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
+            MPI_Send(&z, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
+            MPI_Send(&signmem, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+            MPI_Send(&puls_e, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
+          }
+            MPI_Recv(&signmem, 1, MPI_INT, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(C1, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(C2, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(BP1, dims[0], MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(BP2, dims[1], MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&y1, 4, MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&y2, 4, MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          }
+      
+      if (mpirank>0 && mpirank<3) { // for rank 1 and 2
+          MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          MPI_Recv(&z, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          MPI_Recv(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          MPI_Recv(&puls_e, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          //one step for C1
+          ssfmprop(A, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
+        if (mpirank==1) {
+            //MPI_Send(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD);
         }
-        
-        ssfmprop(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
-        ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
-        ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1, mpirank);
-
+      }
+       
+      if (mpirank>2) { // for rank 3 and 4
+        MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&z, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&puls_e, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        //two steps for C2
+        ssfmprop(A, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
+        ssfmprop(A, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1, mpirank);
+        if (mpirank==3) {
+            MPI_Send(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(BP1, dims[0], MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(BP2, dims[1], MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(&y1, 4, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(&y2, 4, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+        }
+      }
+      MPI_Barrier(MPI_COMM_WORLD);  
+        //ssfmprop(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
+        //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
+        //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1, mpirank);
+      if (mpirank==0) {
         setStep(dims, &dzz, C1, C2, def_err, dzmin, y1, y2, &bad, &err);
 
         if (dr>(y1[1]+y2[1])/2.0) {
-            printf("ERROR Rdim too small, nonlinear effects pull the beam too small for this resolution.\n ");
+            printf("ERROR Rdim too small, nonlinear effects pull the beam too small for this resolution.\n Specs: y1 = %f, y2 = %f, dr = %f\n ",y1[1], y2[1], dr);
             exit(0);
         }
+      
+        for (i=1;i<5;i++) {
+             MPI_Send(&bad, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+          }
+      }
+      if (mpirank>0) {
+         MPI_Recv(&bad, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      }
         if (bad==1) {
            continue;
         }
-        else {
+      else {
+        if (mpirank==0) {
             #pragma omp parallel for 
                 for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
                     A[i] = (4.0/3.0)*C2[i] -(1.0/3.0)*C1[i];
                 }
-        }
-
-        z = z+2.0*dzz;
-        memset(temp, 0, dims[2] * sizeof(double));
-      
-        #pragma omp parallel sections
-        {
-        #pragma omp section
-            {
-            #pragma omp parallel for
-            for (k=0; k<dims[2]; k++) {
-                //#pragma omp parallel for private(i,k) shared(temp) reduction(+: temp)
-                for (i=0; i<dims[1]*dims[0]; i++) {
-                    temp[k] += A[k*dims[1]*dims[0]+i];
-                }
-                temp[k] = cabs(temp[k]);
-            }
-            }
-        #pragma omp section
-            {
-            memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
-            memset(spec, 0, dims[2] * sizeof(double));
-            fftw_execute_dft(pTfft, C2, C2);    
-            //fftshift(C2, dims, C1, 3); % This was taking so long I took it out, we can do this in matlab.
             
-            #pragma omp parallel for
-            for (k=0; k<dims[2]; k++) {
-                //#pragma omp parallel for private(i,k) shared(spec) reduction(+: spec)
-                for (i=0; i<dims[1]*dims[0]; i++) {
-                    spec[k] += C2[k*dims[1]*dims[0]+i];
-                }
-                spec[k] = cabs(spec[k]);
-            }
-            } 
-        }
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-                fwrite(BP1, sizeof(double), dims[1], fbp1p);
-            #pragma omp section
-                fwrite(BP2, sizeof(double), dims[1], fbp2p);
-            #pragma omp section
-                fwrite(temp, sizeof(double), dims[2], ftemp); 
-            #pragma omp section
-                fwrite(spec, sizeof(double), dims[2], fspep);
-        }
-        fprintf(fothp, "%f\t%f\n", err, dzz);
-        if (z>dist) {
-            z = dist;
-        }
-        
-        printf("We are here: %5.2f", z*100.0/dist );
-        nstep++;
-        //exit(0);
-        //if (nstep == 1)
-        //{        
-        //    z=dist; //csak egy kor
-        //}
-        //exit(0);
-    }
+            z = z+2.0*dzz;
+            memset(temp, 0, dims[2] * sizeof(double));
 
-fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], foutp);
-fclose(fbp1p);
-fclose(fbp2p);
-fclose(ftemp);
-fclose(fspep);
-fclose(fothp);
-fclose(foutp);
+            #pragma omp parallel sections
+            {
+            #pragma omp section
+                {
+                #pragma omp parallel for
+                for (k=0; k<dims[2]; k++) {
+                    //#pragma omp parallel for private(i,k) shared(temp) reduction(+: temp)
+                    for (i=0; i<dims[1]*dims[0]; i++) {
+                        temp[k] += A[k*dims[1]*dims[0]+i];
+                    }
+                    temp[k] = cabs(temp[k]);
+                }
+                }
+            #pragma omp section
+                {
+                memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
+                memset(spec, 0, dims[2] * sizeof(double));
+                fftw_execute_dft(pTfft, C2, C2);    
+                //fftshift(C2, dims, C1, 3); % This was taking so long I took it out, we can do this in matlab.
+
+                #pragma omp parallel for
+                for (k=0; k<dims[2]; k++) {
+                    //#pragma omp parallel for private(i,k) shared(spec) reduction(+: spec)
+                    for (i=0; i<dims[1]*dims[0]; i++) {
+                        spec[k] += C2[k*dims[1]*dims[0]+i];
+                    }
+                    spec[k] = cabs(spec[k]);
+                }
+                } 
+            }
+            #pragma omp parallel sections
+            {
+                #pragma omp section {
+                    fwrite(BP1, sizeof(double), dims[1], fbp1p);
+                    fflush(fbp1p);
+                }
+                #pragma omp section {
+                    fwrite(BP2, sizeof(double), dims[1], fbp2p);
+                    fflush(fbp2p);
+                }
+                #pragma omp section {
+                    fwrite(temp, sizeof(double), dims[2], ftemp); 
+                    fflush(ftemp);
+                }
+                #pragma omp section {
+                    fwrite(spec, sizeof(double), dims[2], fspep);
+                    fflush(fspep);
+                }
+                #pragma omp section {
+                    fprintf(fothp, "%f\t%f\n", err, dzz);
+                    fflush(fothp);
+                }
+            }
+
+            if (z>dist) {
+                z = dist;
+            }
+
+            printf("We are here: %5.2f\n", z*100.0/dist );
+            nstep++;
+            //exit(0);
+            //if (nstep == 1)
+            //{        
+            //    z=dist; //csak egy kor
+            //}
+            //exit(0);
+            }
+        }
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
+if (mpirank == 0) { 
+    fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], foutp);
+    fclose(fbp1p);
+    fclose(fbp2p);
+    fclose(ftemp);
+    fclose(fspep);
+    fclose(fothp);
+    fclose(foutp);
+}
         
 fftw_destroy_plan(pR1fft);
 fftw_destroy_plan(pR1ifft);
@@ -273,20 +390,23 @@ fftw_cleanup();
 fftw_cleanup_threads();
 
 free(A);
-free(C1);
-free(C2);
-free(temp);
-free(spec);
 free(betas);
 free(wr);
 free(w);
 free(r);
 free(BP1);
 free(BP2);
+      
+if (mpirank == 0) { 
+   free(C1);
+   free(C2);
+   free(temp);
+   free(spec);
+}
 
 MPI_Finalize();
 
-}        
+}
         
    
 void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char* gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change, int mpirank) {   
@@ -296,122 +416,125 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
     double *freeelectrons_sp;
     double complex *exp_D0, *buffersmall, *expR, *buffer2, *buffer, *dA, *A_nl;
     double *tau_c;
-    //printf("DEBUG: Allocating memory for ssfm...\n");
-    exp_D0 = (double complex*)malloc(dims[2] * sizeof(double complex));
-    expR = (double complex*)malloc(dims[0] * sizeof(double complex));
-    buffersmall = (complex double *)malloc(dims[2] * sizeof(complex double));
-    //buffer2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    dA = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     A_nl = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    //printf("\bDone!\n");
+    buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     
-    // Linear step - half step
-   // printf("Linear step...\n");
+    if (mpirank==1 || mpirank==3){
+  
+       // printf("DEBUG: Allocating memory for ssfm...rank: %d\n", mpirank);
+        exp_D0 = (double complex*)malloc(dims[2] * sizeof(double complex));
+        expR = (double complex*)malloc(dims[0] * sizeof(double complex));
+        buffersmall = (complex double *)malloc(dims[2] * sizeof(complex double));
+        //buffer2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+        dA = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+        //printf("\bDone!\n");
+    
+        // Linear step - half step
+        // printf("Linear step...\n");
 
-    #pragma omp parallel for
-    for (i=0; i<dims[2]; i++) {
-        //exp_D0[i] = exp(creal(dzz/2.0*(I*betas[i]-alpha/2.0)))*(cos(cimag(dzz/2.0*(I*betas[i]-alpha/2.0)))+I*sin(cimag(dzz/2.0*(I*betas[i]-alpha/2.0))));//
-        exp_D0[i] = cexp(dzz/2.0*(I*betas[i]-alpha/2.0));
-    }
-   
-    fftshift(exp_D0, dims, buffersmall, 0);
-    calcexpR(expR, signmem, z, Cav, k0, dzz/2, wr, dims); //a fenti ezt helyettesiti csak parallel
+        #pragma omp parallel for
+        for (i=0; i<dims[2]; i++) {
+            //exp_D0[i] = exp(creal(dzz/2.0*(I*betas[i]-alpha/2.0)))*(cos(cimag(dzz/2.0*(I*betas[i]-alpha/2.0)))+I*sin(cimag(dzz/2.0*(I*betas[i]-alpha/2.0))));//
+            exp_D0[i] = cexp(dzz/2.0*(I*betas[i]-alpha/2.0));
+        }
 
-    //exit(0);
-    //FILE *this1;
-    //this1 = fopen("/tmp/tmp.A4EplIZ4xJ/expr.bin","wb");
-    //fwrite(expR, sizeof(double), 2*dims[0], this1);
-    //fclose(this1);
-    //exit(0);
-    fftw_execute_dft(pTfft, A, A);
+        fftshift(exp_D0, dims, buffersmall, 0);
+        calcexpR(expR, signmem, z, Cav, k0, dzz/2, wr, dims); //a fenti ezt helyettesiti csak parallel
 
-    #pragma omp parallel for collapse(2)
+        //exit(0);
+        //FILE *this1;
+        //this1 = fopen("/tmp/tmp.A4EplIZ4xJ/expr.bin","wb");
+        //fwrite(expR, sizeof(double), 2*dims[0], this1);
+        //fclose(this1);
+        //exit(0);
+        fftw_execute_dft(pTfft, A, A);
+
+        #pragma omp parallel for collapse(2)
+            for (k=0; k<dims[2]; k++) {
+                for (i=0; i<dims[0]*dims[1]; i++) {
+                    A[k*dims[0]*dims[1]+i] = A[k*dims[0]*dims[1]+i] * exp_D0[k];// * (double) dims[2]; // Removed conj!
+                }
+            }
+
+        fftw_execute_dft(pTifft, A, A);
+
+        fftw_execute_dft(pR2fft, A, A);
+
+        #pragma omp simd collapse(3) 
         for (k=0; k<dims[2]; k++) {
-            for (i=0; i<dims[0]*dims[1]; i++) {
-                A[k*dims[0]*dims[1]+i] = A[k*dims[0]*dims[1]+i] * exp_D0[k];// * (double) dims[2]; // Removed conj!
+            for (j=0; j<dims[1]; j++) {
+                for (i=0; i<dims[0]; i++) {
+                    A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
+                }
+            }
+        }  
+
+        fftw_execute_dft(pR2ifft, A, A);
+
+        fftw_execute_dft(pR1fft, A, A);
+
+        #pragma omp simd collapse(3) 
+        for (k=0; k<dims[2]; k++) {
+            for (j=0; j<dims[1]; j++) {
+                for (i=0; i<dims[0]; i++) {
+                    A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[i]);
+                }
             }
         }
 
-    fftw_execute_dft(pTifft, A, A);
-             
-    fftw_execute_dft(pR2fft, A, A);
+        fftw_execute_dft(pR1ifft, A, A);
     
-    #pragma omp simd collapse(3) 
-    for (k=0; k<dims[2]; k++) {
-        for (j=0; j<dims[1]; j++) {
-            for (i=0; i<dims[0]; i++) {
-                A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
-            }
+        #pragma omp parallel for  
+        for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
+            A[k] = A[k] / ((double) (dims[2]*dims[1]*dims[0]));
         }
-    }  
-    
-    fftw_execute_dft(pR2ifft, A, A);
-    
-    fftw_execute_dft(pR1fft, A, A);
-    
-    #pragma omp simd collapse(3) 
-    for (k=0; k<dims[2]; k++) {
-        for (j=0; j<dims[1]; j++) {
-            for (i=0; i<dims[0]; i++) {
-                A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[i]);
-            }
-        }
-    }
-    
-    fftw_execute_dft(pR1ifft, A, A);
-    
-    #pragma omp parallel for  
-    for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
-        A[k] = A[k] / ((double) (dims[2]*dims[1]*dims[0]));
-    }
 
-    // Nonlinear step - full step 
-    // printf("Nonlinear step...\n");
-       
-   //            FILE *this3;
-   // this3 = fopen("/tmp/tmp.fSt7RsB2I8/kozben.bin","wb");
-    //fwrite(A, sizeof(double), 2*dims[2]*dims[1]*dims[0], this3);
-   /// fclose(this3);
-    
-    if (sst_on == 1) {
-    #pragma omp parallel for
-       for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-           buffer[i] = A[i];
-       }
-    
-   // FILE *this3;
-   // this3 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/withfftshift.bin","wb");
-   // fwrite(dA, sizeof(double), 2*dims[2]*dims[1]*dims[0], this3);
-   // fclose(this3);
-     
-    double *wbuff;
-    wbuff = (double *)malloc(dims[2] * sizeof(double));
-    memcpy (wbuff, w, dims[2] * sizeof(double) );
-    #pragma omp parallel for
-        for (k=0; k<dims[2]/2; k++) {
-            w[k] = wbuff[dims[2]/2+k];
-            w[dims[2]/2+k] = wbuff[k];
-        }
-    free(wbuff);
-    fftw_execute_dft(pTfft, buffer, buffer);
-    #pragma omp parallel for collapse(2)
-    for (k=0; k<dims[2]; k++) {
-           for (i=0; i<dims[0]*dims[1]; i++) {
-               dA[k*dims[0]*dims[1]+i] = -1.0*I * buffer[k*dims[0]*dims[1]+i] * w[k]; //conj v no conj for w???
+        // Nonlinear step - full step 
+        // printf("Nonlinear step...\n");
+
+       //            FILE *this3;
+       // this3 = fopen("/tmp/tmp.fSt7RsB2I8/kozben.bin","wb");
+        //fwrite(A, sizeof(double), 2*dims[2]*dims[1]*dims[0], this3);
+       /// fclose(this3);
+
+        if (sst_on == 1) {
+        #pragma omp parallel for
+           for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
+               buffer[i] = A[i];
            }
-    }
 
-    fftw_execute_dft(pTifft, dA, dA);
+       // FILE *this3;
+       // this3 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/withfftshift.bin","wb");
+       // fwrite(dA, sizeof(double), 2*dims[2]*dims[1]*dims[0], this3);
+       // fclose(this3);
+     
+        double *wbuff;
+        wbuff = (double *)malloc(dims[2] * sizeof(double));
+        memcpy (wbuff, w, dims[2] * sizeof(double) );
+        #pragma omp parallel for
+            for (k=0; k<dims[2]/2; k++) {
+                w[k] = wbuff[dims[2]/2+k];
+                w[dims[2]/2+k] = wbuff[k];
+            }
+        free(wbuff);
+        fftw_execute_dft(pTfft, buffer, buffer);
+        #pragma omp parallel for collapse(2)
+        for (k=0; k<dims[2]; k++) {
+               for (i=0; i<dims[0]*dims[1]; i++) {
+                   dA[k*dims[0]*dims[1]+i] = -1.0*I * buffer[k*dims[0]*dims[1]+i] * w[k]; //conj v no conj for w???
+               }
+        }
+
+        fftw_execute_dft(pTifft, dA, dA);
 
        
-  //  FILE *this4;
-   // this4 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/withoutfftshift.bin","wb");
-   // fwrite(dA, sizeof(double), 2*dims[2]*dims[1]*dims[0], this4);
-  //  fclose(this4);
-    
-  //  free(wbuff);
-   // exit(0);
+      //  FILE *this4;
+       // this4 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/withoutfftshift.bin","wb");
+       // fwrite(dA, sizeof(double), 2*dims[2]*dims[1]*dims[0], this4);
+      //  fclose(this4);
+
+      //  free(wbuff);
+       // exit(0);
 
        #pragma omp parallel for
        for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
@@ -423,172 +546,180 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
            buffer[i] = gamma2/w0*(2.0*dA[i]*conj(A[i])+A[i]*conj(dA[i])); //Using buffer for a new thing, different than before, to save memory
        }
        
-   }
-   else {
-       memset(buffer, 0, dims[0]*dims[1]*dims[2] * sizeof(complex double));
-   }
-   
-   if (plasm == 1) {
-       if (mpirank == 0) {
-           MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(dims, 3, MPI_INT, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(&w0, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(&deltat, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(gas, 9, MPI_CHAR, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(&rho_c, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(w, dims[2], MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(&rho_nt, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(&n0, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(&tau_c, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
-           MPI_Send(freeelectrons_sp, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD);
-           MPI_Recv(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
        }
-       
-       if (mpirank == 1) {
-           tau_c = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-           freeelectrons_sp = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-           MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(dims, 3, MPI_INT, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(&w0, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(&deltat, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(gas, 9, MPI_CHAR, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(&rho_c, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(w, dims[2], MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(&rho_nt, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(&n0, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(&tau_c, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           MPI_Recv(freeelectrons_sp, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-           ioniz(A, dims, w0, deltat, gas, rho_c, w, rho_nt, n0, tau_c, freeelectrons_sp);
-           #pragma omp parallel for
-           for (i=0; i<dims[0]*dims[1]*dims[2]; i++) { 
-               A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0)-buffer[i] - (1.0 + I * w0 * tau_c[i]) * rho_nt * freeelectrons_sp[i]/2.0;
+       else {
+           memset(buffer, 0, dims[0]*dims[1]*dims[2] * sizeof(complex double));
+       }
+    }
+   // MPI_Barrier(MPI_COMM_WORLD);
+    if (plasm == 1) {
+           if (mpirank == 1 || mpirank == 3) {
+               //printf("DEBUG: Sending variables from rank: %d\n", mpirank);
+               MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD);
+               MPI_Send(buffer, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD);
+               MPI_Send(dims, 3, MPI_INT, mpirank+1, 0, MPI_COMM_WORLD);
+               MPI_Send(&w0, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
+               MPI_Send(&deltat, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
+               MPI_Send(gas, 9, MPI_CHAR, mpirank+1, 0, MPI_COMM_WORLD);
+               MPI_Send(&rho_c, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
+               MPI_Send(w, dims[2], MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
+               MPI_Send(&rho_nt, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
+               MPI_Send(&n0, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
+               //printf("DEBUG: Sending variables done from rank: %d\n", mpirank);
+               MPI_Recv(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               //printf("DEBUG: Received A_nl back, rank: %d\n", mpirank);
            }
-           MPI_Send(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD);
-           free(tau_c);
-           free(freeelectrons_sp);
-       }
 
-  
-   }
-   else {
-       #pragma omp parallel for  
+           if (mpirank == 2 || mpirank == 4) {
+               //printf("DEBUG: Allocating variables at rank: %d\n", mpirank);
+               tau_c = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+               freeelectrons_sp = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+               //printf("DEBUG: Receiving variables at rank: %d\n", mpirank);
+               MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               MPI_Recv(buffer, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               MPI_Recv(dims, 3, MPI_INT, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               MPI_Recv(&w0, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               MPI_Recv(&deltat, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               MPI_Recv(gas, 9, MPI_CHAR, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               MPI_Recv(&rho_c, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               MPI_Recv(w, dims[2], MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               MPI_Recv(&rho_nt, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               MPI_Recv(&n0, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               //printf("DEBUG: Receiving done, now running ioniz at rank: %d\n", mpirank);
+               ioniz(A, dims, w0, deltat, gas, rho_c, w, rho_nt, n0, tau_c, freeelectrons_sp);
+               //printf("DEBUG: ioniz done at rank: %d\n", mpirank);
+               #pragma omp parallel for
+               for (i=0; i<dims[0]*dims[1]*dims[2]; i++) { 
+                   A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0)-buffer[i] - (1.0 + I * w0 * tau_c[i]) * rho_nt * freeelectrons_sp[i]/2.0;
+               }
+               //printf("DEBUG: Sending A_nl at rank: %d\n", mpirank);
+               MPI_Send(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD);
+               //printf("DEBUG: A_nl done at rank: %d\n", mpirank);
+               free(tau_c);
+               free(freeelectrons_sp);
+           }
+    }
+    else {
+           #pragma omp parallel for  
+           for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
+               A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0) - buffer[i];
+           }
+    }
+    //printf("Waiting for everyone, rank: %d\n", mpirank);
+    //MPI_Barrier(MPI_COMM_WORLD);
+    //printf("Everybody done\n");
+    if (mpirank == 1 || mpirank == 3) {
+      #pragma omp parallel for
        for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-           A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0) - buffer[i];
+           //A[i] = A[i] * cexp(dzz * A_nl[i]); 
+           A[i] = A[i] * exp(creal(dzz * A_nl[i]))*(cos(cimag(dzz * A_nl[i]))+I*sin(cimag(dzz * A_nl[i])));
        }
-       
-   }
 
-  #pragma omp parallel for
-   for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-       //A[i] = A[i] * cexp(dzz * A_nl[i]); 
-       A[i] = A[i] * exp(creal(dzz * A_nl[i]))*(cos(cimag(dzz * A_nl[i]))+I*sin(cimag(dzz * A_nl[i])));
-   }
-
-    // Linear step - half step
-  // printf("Linear step...\n");
-   fftw_execute_dft(pTfft, A, A);
- #pragma omp parallel for collapse(2)
-   for (k=0; k<dims[2]; k++) {
-       for (i=0; i<dims[0]*dims[1]; i++) {
-           A[k*dims[0]*dims[1]+i] = A[k*dims[0]*dims[1]+i] * exp_D0[k];// * (double) dims[2]; // Removed conj!
+        // Linear step - half step
+      // printf("Linear step...\n");
+       fftw_execute_dft(pTfft, A, A);
+     #pragma omp parallel for collapse(2)
+       for (k=0; k<dims[2]; k++) {
+           for (i=0; i<dims[0]*dims[1]; i++) {
+               A[k*dims[0]*dims[1]+i] = A[k*dims[0]*dims[1]+i] * exp_D0[k];// * (double) dims[2]; // Removed conj!
+           }
        }
-   }
-   
-   fftw_execute_dft(pTifft, A, A);
 
-   fftw_execute_dft(pR2fft, A, A);
+       fftw_execute_dft(pTifft, A, A);
 
-   #pragma omp simd collapse(3)
-   for (k=0; k<dims[2]; k++) {
-      for (j=0; j<dims[1]; j++) {
-            for (i=0; i<dims[0]; i++) {
-                A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
-            }
-       }
-   }
-       
-   fftw_execute_dft(pR2ifft, A, A);
-   
-   fftw_execute_dft(pR1fft, A, A);
+       fftw_execute_dft(pR2fft, A, A);
 
-  #pragma omp simd collapse(3)
-   for (k=0; k<dims[2]; k++) {
-       for (j=0; j<dims[1]; j++) {
-           for (i=0; i<dims[0]; i++) {
-                A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[i]);
-            }
+       #pragma omp simd collapse(3)
+       for (k=0; k<dims[2]; k++) {
+          for (j=0; j<dims[1]; j++) {
+                for (i=0; i<dims[0]; i++) {
+                    A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[j]);
+                }
+           }
        }
-   }
-      
-   fftw_execute_dft(pR1ifft, A, A);
-     
-  #pragma omp parallel for
-  for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
-      A[k] = A[k] / ((double) (dims[2]*dims[1]*dims[0]));
-  }
-   //   FILE *this3;
-   //this3 = fopen("/tmp/tmp.fSt7RsB2I8/kozben.bin","wb");
-   //fwrite(A, sizeof(double), 2*dims[2]*dims[1]*dims[0], this3);
-   //fclose(this3);
-   //exit(0);
-   
-  //memcpy(temp, A, dims[2]*dims[1]*dims[0]* sizeof(complex double)); 
-   //        FILE *this2;
-    //this2 = fopen("/tmp/tmp.fSt7RsB2I8/utana.bin","wb");
-    //fwrite(A, sizeof(double), 2*dims[2]*dims[1]*dims[0], this2);
-    //fclose(this2);
-    //exit(0);
-    //printf("Exitingggggg");
-   
-   if (change==1) {
-       signum = ((int) (floor(z/Cav)+1) % 2) * 2-1;
-       if (*signmem == -signum) {
-           *puls_e = *puls_e*Ab_M;
-           //printf("Most vesuznk el egy kis energiat ahahahha\n");
-           *signmem *= -1;
-       }
-      // printf("This is now signum: %d and signmem: %d\n",signum, *signmem);
-      // printf("z= %f, Cav = %f,floor(z/Cav) = %f, floor(z/Cav)+1  2= %d \n",z,Cav,floor(z/Cav),((int)(floor(z/Cav)+1) % 2));
-   }
-   
-   //mexPrintf("Ide eljutottunk4\n");
-   if (change==1) {
-       memset(BP1, 0, dims[2] * sizeof(double));
-       memset(BP2, 0, dims[2] * sizeof(double));
-       //#pragma omp parallel for collapse(3) shared(BP1,BP2) reduction(+:BP1,BP2)
-       for (i=0; i<dims[2]; i++) {
+
+       fftw_execute_dft(pR2ifft, A, A);
+
+       fftw_execute_dft(pR1fft, A, A);
+
+      #pragma omp simd collapse(3)
+       for (k=0; k<dims[2]; k++) {
            for (j=0; j<dims[1]; j++) {
-               for (k=0; k<dims[0]; k++) {
-                   BP1[k] += pow(cabs(A[k+dims[0]*j+i*dims[0]*dims[1]]),2.0);
-                   BP2[j] += pow(cabs(A[k+dims[0]*j+i*dims[0]*dims[1]]),2.0);
+               for (i=0; i<dims[0]; i++) {
+                    A[k*dims[0]*dims[1]+j*dims[1]+i] = A[k*dims[0]*dims[1]+j*dims[1]+i] * conj(expR[i]);
+                }
+           }
+       }
+
+       fftw_execute_dft(pR1ifft, A, A);
+
+      #pragma omp parallel for
+      for (k=0; k<dims[2]*dims[1]*dims[0]; k++) {
+          A[k] = A[k] / ((double) (dims[2]*dims[1]*dims[0]));
+      }
+       //   FILE *this3;
+       //this3 = fopen("/tmp/tmp.fSt7RsB2I8/kozben.bin","wb");
+       //fwrite(A, sizeof(double), 2*dims[2]*dims[1]*dims[0], this3);
+       //fclose(this3);
+       //exit(0);
+
+      //memcpy(temp, A, dims[2]*dims[1]*dims[0]* sizeof(complex double)); 
+       //        FILE *this2;
+        //this2 = fopen("/tmp/tmp.fSt7RsB2I8/utana.bin","wb");
+        //fwrite(A, sizeof(double), 2*dims[2]*dims[1]*dims[0], this2);
+        //fclose(this2);
+        //exit(0);
+        //printf("Exitingggggg");
+   
+       if (change==1) {
+           signum = ((int) (floor(z/Cav)+1) % 2) * 2-1;
+           if (*signmem == -signum) {
+               *puls_e = *puls_e*Ab_M;
+               //printf("Most vesuznk el egy kis energiat ahahahha\n");
+               *signmem *= -1;
+           }
+          // printf("This is now signum: %d and signmem: %d\n",signum, *signmem);
+          // printf("z= %f, Cav = %f,floor(z/Cav) = %f, floor(z/Cav)+1  2= %d \n",z,Cav,floor(z/Cav),((int)(floor(z/Cav)+1) % 2));
+       }
+
+       //mexPrintf("Ide eljutottunk4\n");
+       if (change==1) {
+           memset(BP1, 0, dims[2] * sizeof(double));
+           memset(BP2, 0, dims[2] * sizeof(double));
+           //#pragma omp parallel for collapse(3) shared(BP1,BP2) reduction(+:BP1,BP2)
+           for (i=0; i<dims[2]; i++) {
+               for (j=0; j<dims[1]; j++) {
+                   for (k=0; k<dims[0]; k++) {
+                       BP1[k] += pow(cabs(A[k+dims[0]*j+i*dims[0]*dims[1]]),2.0);
+                       BP2[j] += pow(cabs(A[k+dims[0]*j+i*dims[0]*dims[1]]),2.0);
+                   }
                }
            }
-       }
-       #pragma omp parallel sections
-       {
-           #pragma omp section
-               calc1oes(BP1, dims, r, bps1, y1);
-           #pragma omp section
-               calc1oes(BP2, dims, r, bps2, y2);
-       }
-   }
-   
-   // FILE *this1;
-   // this1 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/ion.bin","wb");
-   // fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], this1);
-   // fclose(this1);
+           #pragma omp parallel sections
+           {
+               #pragma omp section
+                   calc1oes(BP1, dims, r, bps1, y1);
+               #pragma omp section
+                   calc1oes(BP2, dims, r, bps2, y2);
+           }
+        }
     
-   // exit(0);
+       // FILE *this1;
+       // this1 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/ion.bin","wb");
+       // fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], this1);
+       // fclose(this1);
 
-   //printf("SSFM Done!\n");
-   free(A_nl);
-   free(buffer);
-   free(dA);
-   free(exp_D0);
-   free(expR);
-   free(buffersmall);
-    
-}      
+       // exit(0);
+
+       //printf("SSFM Done!\n");
+       free(dA);
+       free(exp_D0);
+       free(expR);
+       free(buffersmall);
+    }
+    free(A_nl);
+    free(buffer);
+  }      
 
 void ionizpot(const char* gas, double *I1, double *I2) {
     
@@ -982,13 +1113,13 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    
    if (dims[0]==512) {
        const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom512";
-       printf("Reading 512 wisdom.\n");
+      // printf("Reading 512 wisdom.\n");
      //  readnotwrite = 0;
        fftw_import_wisdom_from_filename(bop);
    }
    else if (dims[0]==1024) {
        const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom1024";
-       printf("Reading 1024 wisdom.\n");
+      // printf("Reading 1024 wisdom.\n");
      //  readnotwrite = 0;
        fftw_import_wisdom_from_filename(bop);
    }
