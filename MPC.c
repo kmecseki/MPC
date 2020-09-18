@@ -53,9 +53,12 @@ void main(int argc, char *argv[]) {
     int mpisize, mpirank;
     MPI_Comm_size(MPI_COMM_WORLD, &mpisize);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpirank);
-    printf("Starting up! mpirank: %d\n",mpirank);
+    char processor_name[MPI_MAX_PROCESSOR_NAME];
+    int name_len;
+    MPI_Get_processor_name(processor_name, &name_len);
+    printf("Starting up! hostname: %s,mpirank: %d\n",processor_name, mpirank);
     
-    const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/"; 
+    const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata2/"; 
     //const char *cpath = "/reg/neh/home/kmecseki/broad3/3Dfortest/3D/files/data/"; 
     int dims[3];  
     
@@ -210,18 +213,36 @@ void main(int argc, char *argv[]) {
    // exit(0);
    // return;
     
-
+          //double *bro;
+        //  bro = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+          
+      //    if (mpirank == 0) {
+     //         #pragma omp parallel for
+  //  for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
+   //     bro[i] = creal(A[i]);
+ //   }
+    //      }
     
     while (z<dist) {
-        
+      // char estring[MPI_MAX_ERROR_STRING];
+       //MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN);
+      // int error, len, eclass;
+       
       if (mpirank == 0) {
         //#pragma omp parallel
         //{
         //        memcpy(C1, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
         //        memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
         //}
+          printf("DEBUG: Sending values from rank 0!\n");
+          MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 1, MPI_COMM_WORLD);
+         // MPI_Send(bro, dims[0]*dims[1]*dims[2], MPI_DOUBLE, 1, 1, MPI_COMM_WORLD);
+          printf("DEBUG: One down!\n");
+          MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 2, 2, MPI_COMM_WORLD);
+          //MPI_Send(bro, dims[0]*dims[1]*dims[2], MPI_DOUBLE, 2, 2, MPI_COMM_WORLD);
+          printf("A sent to 1 and 2!\n");
           for (i=1;i<5;i++) {
-            MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, i, 0, MPI_COMM_WORLD);
+            //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, i, 0, MPI_COMM_WORLD);
             MPI_Send(&dzz, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
             MPI_Send(&z, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
             MPI_Send(&signmem, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
@@ -237,7 +258,12 @@ void main(int argc, char *argv[]) {
           }
       
       if (mpirank>0 && mpirank<3) { // for rank 1 and 2
-          MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          printf("DEBUG: Receiving values from rank 1 and 2!\n");
+          MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          //MPI_Recv(bro, dims[0]*dims[1]*dims[2], MPI_DOUBLE, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          //MPI_Error_string(error, estring, &len);
+          //printf("Error %d: %s\n", eclass, estring);fflush(stdout);
+          printf("DEBUG: Receiving done at rank 1 and 2! %d\n",mpirank);
           MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
           MPI_Recv(&z, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
           MPI_Recv(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -251,7 +277,7 @@ void main(int argc, char *argv[]) {
       }
        
       if (mpirank>2) { // for rank 3 and 4
-        MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Recv(&z, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Recv(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -269,6 +295,7 @@ void main(int argc, char *argv[]) {
         }
       }
       MPI_Barrier(MPI_COMM_WORLD);  
+      printf("Done with a step!\n");
         //ssfmprop(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
         //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
         //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1, mpirank);
@@ -332,23 +359,28 @@ void main(int argc, char *argv[]) {
             }
             #pragma omp parallel sections
             {
-                #pragma omp section {
+                #pragma omp section 
+                {
                     fwrite(BP1, sizeof(double), dims[1], fbp1p);
                     fflush(fbp1p);
                 }
-                #pragma omp section {
+                #pragma omp section 
+                {
                     fwrite(BP2, sizeof(double), dims[1], fbp2p);
                     fflush(fbp2p);
                 }
-                #pragma omp section {
+                #pragma omp section 
+                {
                     fwrite(temp, sizeof(double), dims[2], ftemp); 
                     fflush(ftemp);
                 }
-                #pragma omp section {
+                #pragma omp section 
+                {
                     fwrite(spec, sizeof(double), dims[2], fspep);
                     fflush(fspep);
                 }
-                #pragma omp section {
+                #pragma omp section 
+                {
                     fprintf(fothp, "%f\t%f\n", err, dzz);
                     fflush(fothp);
                 }
@@ -405,7 +437,7 @@ if (mpirank == 0) {
 }
 
 MPI_Finalize();
-
+return;
 }
         
    
@@ -420,8 +452,8 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
     buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     
     if (mpirank==1 || mpirank==3){
-  
-       // printf("DEBUG: Allocating memory for ssfm...rank: %d\n", mpirank);
+        
+        printf("DEBUG: Allocating memory for ssfm...rank: %d\n", mpirank);
         exp_D0 = (double complex*)malloc(dims[2] * sizeof(double complex));
         expR = (double complex*)malloc(dims[0] * sizeof(double complex));
         buffersmall = (complex double *)malloc(dims[2] * sizeof(complex double));
@@ -554,7 +586,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
    // MPI_Barrier(MPI_COMM_WORLD);
     if (plasm == 1) {
            if (mpirank == 1 || mpirank == 3) {
-               //printf("DEBUG: Sending variables from rank: %d\n", mpirank);
+               printf("DEBUG: Sending variables from rank: %d\n", mpirank);
                MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD);
                MPI_Send(buffer, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD);
                MPI_Send(dims, 3, MPI_INT, mpirank+1, 0, MPI_COMM_WORLD);
@@ -565,16 +597,16 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
                MPI_Send(w, dims[2], MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
                MPI_Send(&rho_nt, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
                MPI_Send(&n0, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
-               //printf("DEBUG: Sending variables done from rank: %d\n", mpirank);
+               printf("DEBUG: Sending variables done from rank: %d done\n", mpirank);
                MPI_Recv(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-               //printf("DEBUG: Received A_nl back, rank: %d\n", mpirank);
+               printf("DEBUG: Received A_nl back, rank: %d\n", mpirank);
            }
 
            if (mpirank == 2 || mpirank == 4) {
-               //printf("DEBUG: Allocating variables at rank: %d\n", mpirank);
+               printf("DEBUG: Allocating variables at rank: %d\n", mpirank);
                tau_c = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
                freeelectrons_sp = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-               //printf("DEBUG: Receiving variables at rank: %d\n", mpirank);
+               printf("DEBUG: Receiving variables at rank: %d\n", mpirank);
                MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                MPI_Recv(buffer, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                MPI_Recv(dims, 3, MPI_INT, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -585,9 +617,9 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
                MPI_Recv(w, dims[2], MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                MPI_Recv(&rho_nt, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                MPI_Recv(&n0, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-               //printf("DEBUG: Receiving done, now running ioniz at rank: %d\n", mpirank);
+               printf("DEBUG: Receiving done, now running ioniz at rank: %d\n", mpirank);
                ioniz(A, dims, w0, deltat, gas, rho_c, w, rho_nt, n0, tau_c, freeelectrons_sp);
-               //printf("DEBUG: ioniz done at rank: %d\n", mpirank);
+               printf("DEBUG: ioniz done at rank: %d\n", mpirank);
                #pragma omp parallel for
                for (i=0; i<dims[0]*dims[1]*dims[2]; i++) { 
                    A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0)-buffer[i] - (1.0 + I * w0 * tau_c[i]) * rho_nt * freeelectrons_sp[i]/2.0;
@@ -762,11 +794,25 @@ void ionizpot(const char* gas, double *I1, double *I2) {
 
 void ADK(double *ionizationrates1, double *ionizationrates2, int *dims, double *C_nl, double *f_lm, double *nq, double *mq, double *Ei, double *E) {
     int i;  
+    double Kon1, Kon2, Kon3, Kon4, Kon5, Kon6;
+    Kon1 = pow(cabs(C_nl[0]),2.0) * sqrt(6.0/M_PI) * f_lm[0] * Ei[0];
+    Kon2 = pow(cabs(C_nl[1]),2.0) * sqrt(6.0/M_PI) * f_lm[1] * Ei[1];
+    Kon3 = 2.0 * pow(2.0*Ei[0],3.0/2.0);
+    Kon4 = 2.0 * pow(2.0*Ei[1],3.0/2.0);
+    Kon5 = 2.0*nq[0]-mq[0]-3.0/2.0;
+    Kon6 = 2.0*nq[1]-mq[1]-3.0/2.0;
+           
     #pragma omp parallel for
     for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-            ionizationrates1[i] = pow(cabs(C_nl[0]),2.0) * sqrt(6.0/M_PI) * f_lm[0] * Ei[0] * pow(2.0 * pow(2.0*Ei[0],3.0/2.0) /E[i],2.0*nq[0]-mq[0]-3.0/2.0)*exp(-2.0*pow(2*Ei[0],3.0/2.0)/(3.0*E[i]));
-            ionizationrates2[i] = pow(cabs(C_nl[1]),2.0) * sqrt(6.0/M_PI) * f_lm[1] * Ei[1] * pow(2.0 * pow(2.0*Ei[1],3.0/2.0) /E[i],2.0*nq[1]-mq[1]-3.0/2.0)*exp(-2.0*pow(2*Ei[1],3.0/2.0)/(3.0*E[i]));
+            ionizationrates1[i] = Kon1 * pow(Kon3 /E[i],Kon5)*exp(-Kon3/(3.0*E[i]));
+            ionizationrates2[i] = Kon2 * pow(Kon4 /E[i],Kon6)*exp(-Kon4/(3.0*E[i]));
         }
+   // #pragma omp parallel for
+   // for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
+    //        ionizationrates1[i] = pow(cabs(C_nl[0]),2.0) * sqrt(6.0/M_PI) * f_lm[0] * Ei[0] * pow(2.0 * pow(2.0*Ei[0],3.0/2.0) /E[i],2.0*nq[0]-mq[0]-3.0/2.0)*exp(-2.0*pow(2*Ei[0],3.0/2.0)/(3.0*E[i]));
+   //         ionizationrates2[i] = pow(cabs(C_nl[1]),2.0) * sqrt(6.0/M_PI) * f_lm[1] * Ei[1] * pow(2.0 * pow(2.0*Ei[1],3.0/2.0) /E[i],2.0*nq[1]-mq[1]-3.0/2.0)*exp(-2.0*pow(2*Ei[1],3.0/2.0)/(3.0*E[i]));
+   //     }
+  
 }
         
 void Natoms(const char *gas, double *Natm, double *sigm_coll) {  
@@ -837,7 +883,6 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     double *W_adk1, *W_adk2, *W_ava1, *Rateint;
     double Natm, sigm_coll;
     double *rate, *ions1, *ions2, *sigma_pla;
-            
     Ip = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     E0 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     datpuls = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
@@ -855,7 +900,6 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     
     Kon = deltat/T0;
     k0 = w0/C0;
-    
     /* Pulse */
     #pragma omp parallel for
     for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
@@ -871,7 +915,6 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     lq = (double *)malloc(2 * sizeof(double));
     mq = (double *)malloc(2 * sizeof(double));
     C_nl = (double *)malloc(2 * sizeof(double));
-    
     ionizpot(gas, &I1, &I2);
     Iion[0] = I1/IH;
     Iion[1] = I2/IH;
@@ -888,7 +931,6 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     
     C_nl[0] = sqrt(pow(2.0,2.0*nq[0]) * pow(nq[0] * tgamma(nq[0]+lq[0]+1.0) * tgamma(nq[0]-lq[0]),-1.0));
     C_nl[1] = sqrt(pow(2.0,nq[1]) * pow(nq[1] * tgamma(nq[1]+lq[1]+1.0) * tgamma(nq[1]-lq[1]),-1.0));
-    
     ADK(W_adk1, W_adk2, dims, C_nl, f_lm, nq, mq, Iion, datpuls);
     free(Iion);
     free(datpuls);
@@ -910,12 +952,19 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     W_ava1 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     sigma_pla = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));    
     Natoms(gas, &Natm, &sigm_coll);
+    double K1, K2, K3, K4, K5;
+    
+    K1 = 2.0 * pow(EL0,2.0);
+    K2 = 4.0*pow(ME,2.0);
+    K3 = sigm_coll*rho_nt;
+    K4 = k0/(n0*rho_c)*w0;
+    K5 = pow(w0,2);
     #pragma omp parallel for collapse(2) private(ve)
     for (k=0; k<dims[2]; k++) {
        for (i=0; i<dims[0]*dims[1]; i++) {
-            ve = sqrt(2.0 * pow(EL0,2.0) * pow(E0[k*dims[0]*dims[1]+i],2.0) /(4.0*pow(ME,2.0) * pow(w[k]+w0,2.0))); // free electron velocity in E-field 
-            tau_c[k*dims[0]*dims[1]+i] = 1.0/(sigm_coll*rho_nt*ve); //% collision time or mean free time  
-            sigma_pla[k*dims[0]*dims[1]+i] = k0/(n0*rho_c)*w0*tau_c[k*dims[0]*dims[1]+i]/(1.0+pow(w0,2)*pow(tau_c[k*dims[0]*dims[1]+i],2.0));
+            ve = sqrt(K1 * pow(E0[k*dims[0]*dims[1]+i],2.0) /(K2 * pow(w[k]+w0,2.0))); // free electron velocity in E-field 
+            tau_c[k*dims[0]*dims[1]+i] = 1.0/(K3 * ve); //% collision time or mean free time  
+            sigma_pla[k*dims[0]*dims[1]+i] = K4*tau_c[k*dims[0]*dims[1]+i]/(1.0+K5*pow(tau_c[k*dims[0]*dims[1]+i],2.0));
             W_ava1[k*dims[0]*dims[1]+i] = sigma_pla[k*dims[0]*dims[1]+i]*Ip[k*dims[0]*dims[1]+i]/I1;
        }
     }
@@ -925,8 +974,7 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     
     //for (int i=0; i<dims[1]*dims[0]; i++) {
     //    Rateint[i] = 0.0;
-    //}
-    
+    //}      
     Rateint = (double *)calloc(dims[0]*dims[1], sizeof(double));
     ions1 = (double *)calloc((dims[0]*dims[1]*(dims[2]+1)), sizeof(double));
     ions2 = (double *)calloc((dims[0]*dims[1]*(dims[2]+1)), sizeof(double));
@@ -941,8 +989,7 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
             ions1[(k+1)*dims[0]*dims[1]+i] = 1.0-exp(-Rateint[i])-ions2[k*dims[0]*dims[1]+i];
             ions2[(k+1)*dims[0]*dims[1]+i] = ions2[k*dims[0]*dims[1]+i]+ (W_adk2[k*dims[0]*dims[1]+i])*Kon*ions1[k*dims[0]*dims[1]+i];
         }
-    }
-    
+    }   
     free(Rateint);
     free(W_ava1);
     free(W_adk1);
@@ -1188,8 +1235,10 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    
    //Write out wisdom, uncomment for new hardware.
    //if (readnotwrite==1)
-   //const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom1024";
-   //fftw_export_wisdom_to_filename(bop);
+   //if (dims[0]==1024) {
+   //    const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom1024";
+   //    fftw_export_wisdom_to_filename(bop);
+   //}
    //exit(0);
    //
    free(buffer);
