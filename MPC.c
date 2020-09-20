@@ -1,7 +1,7 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <complex.h>
-#include<fftw3.h>
+#include <fftw3.h>
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -25,6 +25,8 @@
 ////afs/slac/package/intel_tools/2015u2/bin/icc -o fullrun4 -O3 -lfftw3_threads -lfftw3 -lpthread -openmp source_code_name.c
 ////mpicc -o MCPSim -O3 -lm -lfftw3_threads -lfftw3 -lpthread MPC_code_v20200915MPI.c
 /// current wisdom created on psanagpu111
+// nersc, module load cray-fftw, module load openmpi
+// mpicc -o MCPSim1024 -I$FFTW_ROOT/include -L$FFTW_ROOT/lib -O3 -qopenmp -lfftw3_threads -lfftw3 -lpthread MPC_code_v20200920nersc.c
 
 
 void ionizpot(const char* gas, double *I1, double *I2);
@@ -37,6 +39,8 @@ void calc1oes (double *BP, int *dims, double *r, double *vald1oes, double *y);
 void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char *gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change, int mpirank);
 void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR2fft, fftw_plan *pR2ifft, fftw_plan *pTfft, fftw_plan *pTifft);
 void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err);
+void sendmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankto);
+void recmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankfrom);
 
 void main(int argc, char *argv[]) {
     
@@ -58,7 +62,8 @@ void main(int argc, char *argv[]) {
     MPI_Get_processor_name(processor_name, &name_len);
     printf("Starting up! hostname: %s,mpirank: %d\n",processor_name, mpirank);
     
-    const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata2/"; 
+    //const char *cpath = "/global/homes/k/kmecseki/broad/data";  //nersc
+    const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata3"; 
     //const char *cpath = "/reg/neh/home/kmecseki/broad3/3Dfortest/3D/files/data/"; 
     int dims[3];  
     
@@ -124,7 +129,7 @@ void main(int argc, char *argv[]) {
     w = (double *)malloc(dims[2] * sizeof(double));
     r = (double *)malloc(dims[1] * sizeof(double));
     BP1 = (double *)malloc(dims[0] * sizeof(double));
-    BP2 = (double *)malloc(dims[0] * sizeof(double));
+    BP2 = (double *)malloc(dims[1] * sizeof(double));
     
   if (mpirank == 0) { 
     double *Ar, *Ai;
@@ -234,23 +239,24 @@ void main(int argc, char *argv[]) {
         //        memcpy(C1, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
         //        memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
         //}
-          printf("DEBUG: Sending values from rank 0!\n");
-          MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 1, MPI_COMM_WORLD);
-         // MPI_Send(bro, dims[0]*dims[1]*dims[2], MPI_DOUBLE, 1, 1, MPI_COMM_WORLD);
-          printf("DEBUG: One down!\n");
-          MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 2, 2, MPI_COMM_WORLD);
-          //MPI_Send(bro, dims[0]*dims[1]*dims[2], MPI_DOUBLE, 2, 2, MPI_COMM_WORLD);
-          printf("A sent to 1 and 2!\n");
+          //printf("DEBUG: Sending values from rank 0!\n");
+          //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 1, MPI_COMM_WORLD);
+          sendmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 1);
+         // printf("DEBUG: One down!\n");
+          //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 3, 3, MPI_COMM_WORLD);
+          sendmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 3);
+         // printf("A sent to 1 and 3!\n");
           for (i=1;i<5;i++) {
-            //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, i, 0, MPI_COMM_WORLD);
             MPI_Send(&dzz, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
             MPI_Send(&z, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
             MPI_Send(&signmem, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
             MPI_Send(&puls_e, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
           }
             MPI_Recv(&signmem, 1, MPI_INT, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(C1, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(C2, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            //MPI_Recv(C1, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            recmpi(C1, MPI_C_DOUBLE_COMPLEX, dims, 1);
+            //MPI_Recv(C2, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            recmpi(C2, MPI_C_DOUBLE_COMPLEX, dims, 3);
             MPI_Recv(BP1, dims[0], MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(BP2, dims[1], MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(&y1, 4, MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -258,12 +264,22 @@ void main(int argc, char *argv[]) {
           }
       
       if (mpirank>0 && mpirank<3) { // for rank 1 and 2
-          printf("DEBUG: Receiving values from rank 1 and 2!\n");
-          MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          //printf("DEBUG: Receiving values from rank 1 and 2!\n");
+          if (mpirank==1) {
+              //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+              recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);      
+            //FILE *this1;
+            //this1 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/poh.bin","wb");
+            //fwrite(A, sizeof(complex double), dims[2]*dims[1]*dims[0], this1);
+            //fclose(this1);
+            //exit(0);
+            //return;             
+              //printf("DEBUG: Received done at rank %d\n",mpirank);
+          }
           //MPI_Recv(bro, dims[0]*dims[1]*dims[2], MPI_DOUBLE, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
           //MPI_Error_string(error, estring, &len);
           //printf("Error %d: %s\n", eclass, estring);fflush(stdout);
-          printf("DEBUG: Receiving done at rank 1 and 2! %d\n",mpirank);
+          
           MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
           MPI_Recv(&z, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
           MPI_Recv(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -272,12 +288,21 @@ void main(int argc, char *argv[]) {
           ssfmprop(A, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
         if (mpirank==1) {
             //MPI_Send(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
-            MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD);
+            //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD);
+            sendmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);
         }
       }
        
       if (mpirank>2) { // for rank 3 and 4
         //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        if (mpirank==3) {
+            //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);
+            printf("A[268959744]=%f\n",A[268959744]);
+            printf("A[10]=%f\n",A[10]);
+            printf("A[100]=%f\n",A[100]);
+            //printf("DEBUG: Received done at rank %d\n",mpirank);
+        }
         MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Recv(&z, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Recv(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -287,7 +312,8 @@ void main(int argc, char *argv[]) {
         ssfmprop(A, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1, mpirank);
         if (mpirank==3) {
             MPI_Send(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
-            MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD);
+            //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD);
+            sendmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);
             MPI_Send(BP1, dims[0], MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
             MPI_Send(BP2, dims[1], MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
             MPI_Send(&y1, 4, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
@@ -295,17 +321,17 @@ void main(int argc, char *argv[]) {
         }
       }
       MPI_Barrier(MPI_COMM_WORLD);  
-      printf("Done with a step!\n");
+     // printf("Done with a step!\n");
         //ssfmprop(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
         //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
         //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1, mpirank);
       if (mpirank==0) {
         setStep(dims, &dzz, C1, C2, def_err, dzmin, y1, y2, &bad, &err);
 
-        if (dr>(y1[1]+y2[1])/2.0) {
-            printf("ERROR Rdim too small, nonlinear effects pull the beam too small for this resolution.\n Specs: y1 = %f, y2 = %f, dr = %f\n ",y1[1], y2[1], dr);
-            exit(0);
-        }
+       // if (dr>(y1[1]+y2[1])/2.0) {
+       //     printf("ERROR Rdim too small, nonlinear effects pull the beam too small for this resolution.\n Specs: y1 = %f, y2 = %f, dr = %f\n ",y1[1], y2[1], dr);
+       //     exit(0);
+       // }
       
         for (i=1;i<5;i++) {
              MPI_Send(&bad, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
@@ -361,7 +387,7 @@ void main(int argc, char *argv[]) {
             {
                 #pragma omp section 
                 {
-                    fwrite(BP1, sizeof(double), dims[1], fbp1p);
+                    fwrite(BP1, sizeof(double), dims[0], fbp1p);
                     fflush(fbp1p);
                 }
                 #pragma omp section 
@@ -453,7 +479,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
     
     if (mpirank==1 || mpirank==3){
         
-        printf("DEBUG: Allocating memory for ssfm...rank: %d\n", mpirank);
+        //printf("DEBUG: Allocating memory for ssfm...rank: %d\n", mpirank);
         exp_D0 = (double complex*)malloc(dims[2] * sizeof(double complex));
         expR = (double complex*)malloc(dims[0] * sizeof(double complex));
         buffersmall = (complex double *)malloc(dims[2] * sizeof(complex double));
@@ -586,9 +612,11 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
    // MPI_Barrier(MPI_COMM_WORLD);
     if (plasm == 1) {
            if (mpirank == 1 || mpirank == 3) {
-               printf("DEBUG: Sending variables from rank: %d\n", mpirank);
-               MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD);
-               MPI_Send(buffer, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD);
+               //printf("DEBUG: Sending variables from rank: %d\n", mpirank);
+               //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD);
+               sendmpi(A, MPI_C_DOUBLE_COMPLEX, dims, mpirank+1);
+               //MPI_Send(buffer, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD);
+               sendmpi(buffer, MPI_C_DOUBLE_COMPLEX, dims, mpirank+1);
                MPI_Send(dims, 3, MPI_INT, mpirank+1, 0, MPI_COMM_WORLD);
                MPI_Send(&w0, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
                MPI_Send(&deltat, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
@@ -597,18 +625,21 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
                MPI_Send(w, dims[2], MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
                MPI_Send(&rho_nt, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
                MPI_Send(&n0, 1, MPI_DOUBLE, mpirank+1, 0, MPI_COMM_WORLD);
-               printf("DEBUG: Sending variables done from rank: %d done\n", mpirank);
-               MPI_Recv(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-               printf("DEBUG: Received A_nl back, rank: %d\n", mpirank);
+               //printf("DEBUG: Sending variables done from rank: %d done\n", mpirank);
+               //MPI_Recv(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               recmpi(A_nl, MPI_C_DOUBLE_COMPLEX, dims, mpirank+1);
+               //printf("DEBUG: Received A_nl back, rank: %d\n", mpirank);
            }
 
            if (mpirank == 2 || mpirank == 4) {
-               printf("DEBUG: Allocating variables at rank: %d\n", mpirank);
+               //printf("DEBUG: Allocating variables at rank: %d\n", mpirank);
                tau_c = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
                freeelectrons_sp = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-               printf("DEBUG: Receiving variables at rank: %d\n", mpirank);
-               MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-               MPI_Recv(buffer, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               //printf("DEBUG: Receiving variables at rank: %d\n", mpirank);
+               //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, mpirank-1);
+               //MPI_Recv(buffer, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+               recmpi(buffer, MPI_C_DOUBLE_COMPLEX, dims, mpirank-1);
                MPI_Recv(dims, 3, MPI_INT, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                MPI_Recv(&w0, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                MPI_Recv(&deltat, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -617,15 +648,16 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
                MPI_Recv(w, dims[2], MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                MPI_Recv(&rho_nt, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                MPI_Recv(&n0, 1, MPI_DOUBLE, mpirank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-               printf("DEBUG: Receiving done, now running ioniz at rank: %d\n", mpirank);
+              // printf("DEBUG: Receiving done, now running ioniz at rank: %d\n", mpirank);
                ioniz(A, dims, w0, deltat, gas, rho_c, w, rho_nt, n0, tau_c, freeelectrons_sp);
-               printf("DEBUG: ioniz done at rank: %d\n", mpirank);
+               //printf("DEBUG: ioniz done at rank: %d\n", mpirank);
                #pragma omp parallel for
                for (i=0; i<dims[0]*dims[1]*dims[2]; i++) { 
                    A_nl[i] = I * gamma2 * pow(cabs(A[i]),2.0)-buffer[i] - (1.0 + I * w0 * tau_c[i]) * rho_nt * freeelectrons_sp[i]/2.0;
                }
                //printf("DEBUG: Sending A_nl at rank: %d\n", mpirank);
-               MPI_Send(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD);
+               //MPI_Send(A_nl, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, mpirank-1, 0, MPI_COMM_WORLD);
+               sendmpi(A_nl, MPI_C_DOUBLE_COMPLEX, dims, mpirank-1);
                //printf("DEBUG: A_nl done at rank: %d\n", mpirank);
                free(tau_c);
                free(freeelectrons_sp);
@@ -716,8 +748,8 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
 
        //mexPrintf("Ide eljutottunk4\n");
        if (change==1) {
-           memset(BP1, 0, dims[2] * sizeof(double));
-           memset(BP2, 0, dims[2] * sizeof(double));
+           memset(BP1, 0, dims[0] * sizeof(double));
+           memset(BP2, 0, dims[1] * sizeof(double));
            //#pragma omp parallel for collapse(3) shared(BP1,BP2) reduction(+:BP1,BP2)
            for (i=0; i<dims[2]; i++) {
                for (j=0; j<dims[1]; j++) {
@@ -1313,3 +1345,35 @@ void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, dou
     //exit(0);
 }
 
+void sendmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankto) {
+    int div, i, nchunk;
+    //div = 134217728;
+    div = 33554432/2;
+    nchunk = dims[0]*dims[1]*dims[2]/div;
+    if (nchunk<1) {
+        MPI_Send(A, dims[0]*dims[1]*dims[2], datatype, rankto, 0, MPI_COMM_WORLD);
+    }
+    else {
+        for (i=0;i<nchunk;i++) {
+            MPI_Send(A+i*div, dims[0]*dims[1]*dims[2]/nchunk, datatype, rankto, i, MPI_COMM_WORLD);
+        }
+        
+    }
+}
+
+void recmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankfrom) {
+    int div, i, nchunk;
+    //div = 134217728;
+    div = 33554432/2;
+    nchunk = dims[0]*dims[1]*dims[2]/div;
+    if (nchunk<1) {
+        MPI_Recv(A, dims[0]*dims[1]*dims[2], datatype, rankfrom, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+    else {
+        for (i=0;i<nchunk;i++) {
+            MPI_Recv(A+i*div, dims[0]*dims[1]*dims[2]/nchunk, datatype, rankfrom, i, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+    }
+}
+
+        
