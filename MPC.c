@@ -45,6 +45,8 @@ void recmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankfrom);
 void main(int argc, char *argv[]) {
     
     //MPI_Init(&argc, &argv);
+    int cup, resume;
+    resume = 0;
     int provided;
     int lgt;
     lgt = 80;
@@ -74,12 +76,24 @@ void main(int argc, char *argv[]) {
     fparp = fopen(fparn,"r");
     fread(dims, sizeof(int),3,fparp);
         
-    FILE *fmarp, *fmaip, *fbp1p, *fbp2p, *ftemp, *fspep, *fothp, *foutp;
-    char fmarn[lgt], fmain[lgt], fbp1n[lgt], fbp2n[lgt], ftemn[lgt], fspen[lgt], fothn[lgt], foutn[lgt];
+    FILE *fmarp, *fmaip, *fbp1p, *fbp2p, *ftemp, *fspep, *fothp, *foutp, *fresp, *fres2p;
+    char fmarn[lgt], fmain[lgt], fbp1n[lgt], fbp2n[lgt], ftemn[lgt], fspen[lgt], fothn[lgt], foutn[lgt], fresn[lgt], fres2n[lgt];
     
     double complex *C1, *C2;
     
-  if (mpirank == 0) { 
+    if (mpirank == 0) { 
+//        while ((cup = getopt (argc, argv, "r")) != -1)
+//            switch(cup)
+//            {
+//              case 'r':
+//                  resume = 1;
+//                  printf("Resuming previous run!\n");
+//                  break;
+//              default:
+//                  abort();
+//            }
+     
+      
     printf("Matrix dimensions are: %d x %d x %d. \n", dims[0],dims[1],dims[2]);
 
     C1 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
@@ -92,14 +106,26 @@ void main(int argc, char *argv[]) {
     snprintf(fspen, lgt, "%s/%s", cpath, "spec.bin");
     snprintf(fothn, lgt, "%s/%s", cpath, "other.bin");
     snprintf(foutn, lgt, "%s/%s", cpath, "out.bin");
+    snprintf(fresn, lgt, "%s/%s", cpath, "resdata.bin");
+    snprintf(fres2n, lgt, "%s/%s", cpath, "resparam.bin");
     snprintf(fmarn, lgt, "%s/%s", cpath, "datar.bin");
     snprintf(fmain, lgt, "%s/%s", cpath, "datai.bin");
     
-    fbp1p = fopen(fbp1n,"wb");
-    fbp2p = fopen(fbp2n,"wb");
-    ftemp = fopen(ftemn, "wb");
-    fspep = fopen(fspen, "wb");
-    fothp = fopen(fothn, "w");
+//    if (resume == 1) {
+//            fbp1p = fopen(fbp1n,"wba");
+//            fbp2p = fopen(fbp2n,"wba");
+//            ftemp = fopen(ftemn, "wba");
+//            fspep = fopen(fspen, "wba");
+//            fothp = fopen(fothn, "wa");
+//    }
+//    else {
+            fbp1p = fopen(fbp1n,"wb");
+            fbp2p = fopen(fbp2n,"wb");
+            ftemp = fopen(ftemn, "wb");
+            fspep = fopen(fspen, "wb");
+            fothp = fopen(fothn, "w");
+ //   }
+                 
     foutp = fopen(foutn, "wb");
     fmarp = fopen(fmarn,"r");
     fmaip = fopen(fmain,"r");
@@ -132,23 +158,33 @@ void main(int argc, char *argv[]) {
     BP2 = (double *)malloc(dims[1] * sizeof(double));
     
   if (mpirank == 0) { 
-    double *Ar, *Ai;
-    Ar = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-    Ai = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+  //  if (resume == 1) {
+  //        printf("Reading resume data matrix!\n");
+  //        fresp = fopen(fresn,"r");
+  //        fread(A, sizeof(complex double), dims[0]*dims[1]*dims[2], fresp);
+  //        fclose(fresp);
+  //        printf("Read resume data matrix successfully!\n");
+  //  }
+  //  else {
+          double *Ar, *Ai;
+          Ar = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+          Ai = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+          printf("Now reading in data matrix...\n");
+          fread(Ar, sizeof(double),dims[0]*dims[1]*dims[2],fmarp);
+          fread(Ai, sizeof(double),dims[0]*dims[1]*dims[2],fmaip);
+          fclose(fmaip);
+          fclose(fmarp);
+          #pragma omp parallel for
+          for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
+              A[i] = Ar[i] + I*Ai[i];
+          }
+          free(Ar);
+          free(Ai);
+ //   }
+          
     temp = (double *)malloc(dims[2] * sizeof(double));
     spec = (double *)malloc(dims[2] * sizeof(double));
     
-    printf("Now reading in data matrix...\n");
-    fread(Ar, sizeof(double),dims[0]*dims[1]*dims[2],fmarp);
-    fread(Ai, sizeof(double),dims[0]*dims[1]*dims[2],fmaip);
-    fclose(fmaip);
-    fclose(fmarp);
-    #pragma omp parallel for
-    for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-        A[i] = Ar[i] + I*Ai[i];
-    }
-    free(Ar);
-    free(Ai);
     printf("\bDone!\n");
       
   }  
@@ -200,6 +236,20 @@ void main(int argc, char *argv[]) {
     bad = 0;
     signmem = 1;
     nstep = 0;
+    
+//    if (mpirank == 0) {
+//        if (resume == 1) {
+//            printf("Reading resume parameters!\n");
+//            fres2p = fopen(fres2n,"r");
+//            fread(&dzz, sizeof(double), 1, fres2p);
+//            fread(&z, sizeof(double), 1, fres2p);
+//            fread(&signmem, sizeof(int), 1, fres2p);
+//            fread(&puls_e, sizeof(double), 1, fres2p);
+//            fclose(fres2p);
+//            printf("Resume parameters read!\n");
+//        }
+//    }
+
    // printf("\bSending dims to nodes!\n");
    // MPI_Send(dims, 3, MPI_INT, 1, 0, MPI_COMM_WORLD);
    // MPI_Send(dims, 3, MPI_INT, 2, 0, MPI_COMM_WORLD);
@@ -227,6 +277,7 @@ void main(int argc, char *argv[]) {
    //     bro[i] = creal(A[i]);
  //   }
     //      }
+
     
     while (z<dist) {
       // char estring[MPI_MAX_ERROR_STRING];
@@ -267,7 +318,10 @@ void main(int argc, char *argv[]) {
           //printf("DEBUG: Receiving values from rank 1 and 2!\n");
           if (mpirank==1) {
               //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-              recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);      
+              recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);   
+              printf("A[268959744]=%f\n",A[268959744]);
+              printf("A[10]=%f\n",A[10]);
+              printf("A[100]=%f\n",A[100]);
             //FILE *this1;
             //this1 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/poh.bin","wb");
             //fwrite(A, sizeof(complex double), dims[2]*dims[1]*dims[0], this1);
@@ -298,9 +352,9 @@ void main(int argc, char *argv[]) {
         if (mpirank==3) {
             //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);
-            printf("A[268959744]=%f\n",A[268959744]);
-            printf("A[10]=%f\n",A[10]);
-            printf("A[100]=%f\n",A[100]);
+                        printf("A[268959744]=%f\n",A[268959744]);
+    printf("A[10]=%f\n",A[10]);
+    printf("A[100]=%f\n",A[100]);
             //printf("DEBUG: Received done at rank %d\n",mpirank);
         }
         MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -326,6 +380,8 @@ void main(int argc, char *argv[]) {
         //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
         //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1, mpirank);
       if (mpirank==0) {
+            printf("C1[268959744]=%f\n",C1[268959744]);
+            printf("C2[268959744]=%f\n",C2[268959744]);
         setStep(dims, &dzz, C1, C2, def_err, dzmin, y1, y2, &bad, &err);
 
        // if (dr>(y1[1]+y2[1])/2.0) {
@@ -333,23 +389,22 @@ void main(int argc, char *argv[]) {
        //     exit(0);
        // }
       
-        for (i=1;i<5;i++) {
+      for (i=1;i<5;i++) {
              MPI_Send(&bad, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
           }
       }
       if (mpirank>0) {
          MPI_Recv(&bad, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
       }
-        if (bad==1) {
-           continue;
-        }
+      if (bad==1) {
+         continue;
+      }
       else {
         if (mpirank==0) {
             #pragma omp parallel for 
-                for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
+            for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
                     A[i] = (4.0/3.0)*C2[i] -(1.0/3.0)*C1[i];
-                }
-            
+            }
             z = z+2.0*dzz;
             memset(temp, 0, dims[2] * sizeof(double));
 
@@ -417,19 +472,37 @@ void main(int argc, char *argv[]) {
             }
 
             printf("We are here: %5.2f\n", z*100.0/dist );
-            nstep++;
+            if (mpirank == 0) {
+                if ((nstep%20)==0) {
+                    printf("We are at step %d, writing checkpoint data into file.\n", nstep );
+                    //double *Ar, *Ai;
+                    //for (i=0;i<dims[0]*dims[1]*dims[2];i++)
+                    //Ar[i] = creal(A[i]);
+                    //Ai[i] = cimag(A[i]);
+                    fresp = fopen(fresn, "wb");
+                    fwrite(A, sizeof(complex double), dims[0]*dims[1]*dims[2], fresp);
+                    fclose(fresp);
+                    fres2p = fopen(fres2n, "wb");
+                    fwrite(&dzz, sizeof(double), 1, fres2p);
+                    fwrite(&z, sizeof(double), 1, fres2p);
+                    fwrite(&signmem, sizeof(int), 1, fres2p);
+                    fwrite(&puls_e, sizeof(double), 1, fres2p);
+                    fclose(fres2p);
+                }
+            }
             //exit(0);
             //if (nstep == 1)
             //{        
             //    z=dist; //csak egy kor
             //}
             //exit(0);
+            nstep++;
             }
         }
       MPI_Barrier(MPI_COMM_WORLD);
     }
 if (mpirank == 0) { 
-    fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], foutp);
+    fwrite(A, sizeof(complex double), dims[0]*dims[1]*dims[2], foutp);
     fclose(fbp1p);
     fclose(fbp2p);
     fclose(ftemp);
@@ -1268,8 +1341,8 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    //Write out wisdom, uncomment for new hardware.
    //if (readnotwrite==1)
    //if (dims[0]==1024) {
-   //    const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom1024";
-   //    fftw_export_wisdom_to_filename(bop);
+       const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata3/wisdom1024";
+       fftw_export_wisdom_to_filename(bop);
    //}
    //exit(0);
    //
@@ -1298,7 +1371,7 @@ void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, dou
         } 
     
     *err = sqrt(sum1)/sqrt(sum2);
-    //printf("Sum1 = %f, Sum2 = %f\n ", sum1, sum2);
+    printf("Sum1 = %f, Sum2 = %f\n ", sum1, sum2);
     printf("With step size: %.4f, the local error is: %.8g\nThe defined error is:%.8g\n ", *dzz, *err, def_err);
 
     err_fact = pow(2.0,(1.0/3.0)); //Split-step error
@@ -1335,7 +1408,7 @@ void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, dou
     else {
         // Increase step
         ujdz = *dzz*err_fact;
-        if (ujdz>100*(y2[1]+y1[1])/2.0) // Step won't be bigger than the beam size x 2
+        if (ujdz>50*(y2[1]+y1[1])/2.0) // Step won't be bigger than the beam size x 2
             {printf("Step would be too big, keeping it.\n");}
         else {
             *dzz = ujdz;
