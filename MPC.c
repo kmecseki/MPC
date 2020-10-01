@@ -8,6 +8,7 @@
 #include <omp.h>
 #include <time.h>
 #include <mpi.h>
+#include <limits.h>
 
 #define ZW0 377.0
 #define NC 1.0  // refractive index (set to 1)
@@ -41,6 +42,10 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
 void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err);
 void sendmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankto);
 void recmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankfrom);
+void backup(FILE* fp);
+void restore(const char* path);
+void copyfile(const char* path, int dorestore);
+FILE* opener(const char* cpath, const char* fname, const char* fopts, int dorestore);
 
 void main(int argc, char *argv[]) {
     
@@ -65,70 +70,61 @@ void main(int argc, char *argv[]) {
     printf("Starting up! hostname: %s,mpirank: %d\n",processor_name, mpirank);
     
     //const char *cpath = "/global/homes/k/kmecseki/broad/data";  //nersc
-    const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata3"; 
+    const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata2"; 
     //const char *cpath = "/reg/neh/home/kmecseki/broad3/3Dfortest/3D/files/data/"; 
     int dims[3];  
     
     FILE *fparp;
-    char fparn[lgt];
-    
-    snprintf(fparn, lgt, "%s/%s", cpath, "param.bin"); 
-    fparp = fopen(fparn,"r");
+        
+    fparp = opener(cpath, "param.bin", "r", 0);
     fread(dims, sizeof(int),3,fparp);
         
-    FILE *fmarp, *fmaip, *fbp1p, *fbp2p, *ftemp, *fspep, *fothp, *foutp, *fresp, *fres2p;
-    char fmarn[lgt], fmain[lgt], fbp1n[lgt], fbp2n[lgt], ftemn[lgt], fspen[lgt], fothn[lgt], foutn[lgt], fresn[lgt], fres2n[lgt];
-    
+    FILE *fmarp, *fmaip, *fbp1p, *fbp2p, *ftemp, *fspep, *fothp, *foutp, *fresdp, *frespp;
+    char fresdn[lgt], frespn[lgt];
     double complex *C1, *C2;
     
-    if (mpirank == 0) { 
-//        while ((cup = getopt (argc, argv, "r")) != -1)
-//            switch(cup)
-//            {
-//              case 'r':
-//                  resume = 1;
-//                  printf("Resuming previous run!\n");
-//                  break;
-//              default:
-//                  abort();
-//            }
-     
-      
-    printf("Matrix dimensions are: %d x %d x %d. \n", dims[0],dims[1],dims[2]);
+  if (mpirank == 0) { 
+      printf("Matrix dimensions are: %d x %d x %d. \n", dims[0],dims[1],dims[2]);
 
+      while ((cup = getopt (argc, argv, "r")) != -1)
+          switch(cup)
+          {
+           case 'r':
+           resume = 1;
+           printf("Resuming previous run!\n");
+           break;
+
+           default:
+           abort();
+          }
+   
     C1 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     C2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     
-    //const char *cpath = "/tmp/tmp.A4EplIZ4xJ/"; 
-    snprintf(fbp1n, lgt, "%s/%s", cpath, "bp1.bin");
-    snprintf(fbp2n, lgt, "%s/%s", cpath, "bp2.bin");
-    snprintf(ftemn, lgt, "%s/%s", cpath, "temp.bin");
-    snprintf(fspen, lgt, "%s/%s", cpath, "spec.bin");
-    snprintf(fothn, lgt, "%s/%s", cpath, "other.bin");
-    snprintf(foutn, lgt, "%s/%s", cpath, "out.bin");
-    snprintf(fresn, lgt, "%s/%s", cpath, "resdata.bin");
-    snprintf(fres2n, lgt, "%s/%s", cpath, "resparam.bin");
-    snprintf(fmarn, lgt, "%s/%s", cpath, "datar.bin");
-    snprintf(fmain, lgt, "%s/%s", cpath, "datai.bin");
+    //const char *cpath = "/tmp/tmp.A4EplIZ4xJ/";
+   
+    foutp = opener(cpath, "out.bin",   "wb", 0);
     
-//    if (resume == 1) {
-//            fbp1p = fopen(fbp1n,"wba");
-//            fbp2p = fopen(fbp2n,"wba");
-//            ftemp = fopen(ftemn, "wba");
-//            fspep = fopen(fspen, "wba");
-//            fothp = fopen(fothn, "wa");
-//    }
-//    else {
-            fbp1p = fopen(fbp1n,"wb");
-            fbp2p = fopen(fbp2n,"wb");
-            ftemp = fopen(ftemn, "wb");
-            fspep = fopen(fspen, "wb");
-            fothp = fopen(fothn, "w");
- //   }
-                 
-    foutp = fopen(foutn, "wb");
-    fmarp = fopen(fmarn,"r");
-    fmaip = fopen(fmain,"r");
+    snprintf(fresdn, lgt, "%s/%s", cpath, "resdata.bin");
+    snprintf(frespn, lgt, "%s/%s", cpath, "resparam.bin");
+    
+    
+    if (resume == 1) {
+        fbp1p = opener(cpath, "bp1.bin",   "ab",1);
+        fbp2p = opener(cpath, "bp2.bin",   "ab",1);
+        ftemp = opener(cpath, "temp.bin",  "ab",1);
+        fspep = opener(cpath, "spec.bin",  "ab",1);
+        fothp = opener(cpath, "other.bin", "a" ,1);
+    }
+    else {
+        fmarp = opener(cpath, "datar.bin", "r", 0);
+        fmaip = opener(cpath, "datai.bin", "r", 0);
+        fbp1p = opener(cpath, "bp1.bin",   "wb",0);
+        fbp2p = opener(cpath, "bp2.bin",   "wb",0);
+        ftemp = opener(cpath, "temp.bin",  "wb",0);
+        fspep = opener(cpath, "spec.bin",  "wb",0);
+        fothp = opener(cpath, "other.bin", "w", 0);
+    }
   }
     
     char gas[9];
@@ -158,38 +154,35 @@ void main(int argc, char *argv[]) {
     BP2 = (double *)malloc(dims[1] * sizeof(double));
     
   if (mpirank == 0) { 
-  //  if (resume == 1) {
-  //        printf("Reading resume data matrix!\n");
-  //        fresp = fopen(fresn,"r");
-  //        fread(A, sizeof(complex double), dims[0]*dims[1]*dims[2], fresp);
-  //        fclose(fresp);
-  //        printf("Read resume data matrix successfully!\n");
-  //  }
-  //  else {
-          double *Ar, *Ai;
-          Ar = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-          Ai = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-          printf("Now reading in data matrix...\n");
-          fread(Ar, sizeof(double),dims[0]*dims[1]*dims[2],fmarp);
-          fread(Ai, sizeof(double),dims[0]*dims[1]*dims[2],fmaip);
-          fclose(fmaip);
-          fclose(fmarp);
-          #pragma omp parallel for
-          for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-              A[i] = Ar[i] + I*Ai[i];
-          }
-          free(Ar);
-          free(Ai);
- //   }
-          
-    temp = (double *)malloc(dims[2] * sizeof(double));
-    spec = (double *)malloc(dims[2] * sizeof(double));
-    
-    printf("\bDone!\n");
+      if (resume == 1) {
+          printf("Reading resume data matrix!\n");
+          fresdp = fopen(fresdn,"r");
+          fread(A, sizeof(complex double), dims[0]*dims[1]*dims[2], fresdp);
+          fclose(fresdp);
+          printf("Read resume data matrix successfully!\n");
+      }
+      else {
+        double *Ar, *Ai;
+        Ar = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+        Ai = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+
+        printf("Now reading in data matrix...\n");
+        fread(Ar, sizeof(double),dims[0]*dims[1]*dims[2],fmarp);
+        fread(Ai, sizeof(double),dims[0]*dims[1]*dims[2],fmaip);
+        fclose(fmaip);
+        fclose(fmarp);
+        #pragma omp parallel for
+        for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
+            A[i] = Ar[i] + I*Ai[i];
+        }
+        free(Ar);
+        free(Ai);
+        printf("\bDone!\n");
+      }
       
-  }  
-    if (mpirank == 0) {
-        printf("Now reading in parameters...\n");
+      temp = (double *)malloc(dims[2] * sizeof(double));
+      spec = (double *)malloc(dims[2] * sizeof(double));    
+      printf("Now reading in parameters...\n");
     }
 
     fread(&dist, sizeof(double),1,fparp);
@@ -216,6 +209,7 @@ void main(int argc, char *argv[]) {
     fread(&dzmin, sizeof(double),1,fparp);
     fread(gas, sizeof(char),9,fparp);
     
+   // printf("w[45] = %f, from rank = %d\n\n", w[45], mpirank);
     
     fclose(fparp);
     if (mpirank == 0) {
@@ -237,19 +231,27 @@ void main(int argc, char *argv[]) {
     signmem = 1;
     nstep = 0;
     
-//    if (mpirank == 0) {
-//        if (resume == 1) {
-//            printf("Reading resume parameters!\n");
-//            fres2p = fopen(fres2n,"r");
-//            fread(&dzz, sizeof(double), 1, fres2p);
-//            fread(&z, sizeof(double), 1, fres2p);
-//            fread(&signmem, sizeof(int), 1, fres2p);
-//            fread(&puls_e, sizeof(double), 1, fres2p);
-//            fclose(fres2p);
-//            printf("Resume parameters read!\n");
-//        }
-//    }
-
+    if (mpirank == 0) {
+        if (resume == 1) {
+            printf("Reading resume parameters!\n");
+            frespp = fopen(frespn,"r");
+            fread(&dzz, sizeof(double), 1, frespp);
+            fread(&z, sizeof(double), 1, frespp);
+            fread(&signmem, sizeof(int), 1, frespp);
+            fread(&puls_e, sizeof(double), 1, frespp);
+            fread(&nstep, sizeof(int), 1, frespp);
+            fclose(frespp);
+            printf("Resume parameters read!\n");
+           // printf("%f\n",creal(A[268959760]));
+           // printf("%f\n",creal(A[268957760]));
+           // printf("%f\n",dzz);
+           // printf("%f\n",z);
+           // printf("%d\n",signmem);
+           // printf("%f\n",puls_e);
+           // printf("%d\n",nstep);
+        }
+    }
+     
    // printf("\bSending dims to nodes!\n");
    // MPI_Send(dims, 3, MPI_INT, 1, 0, MPI_COMM_WORLD);
    // MPI_Send(dims, 3, MPI_INT, 2, 0, MPI_COMM_WORLD);
@@ -277,7 +279,6 @@ void main(int argc, char *argv[]) {
    //     bro[i] = creal(A[i]);
  //   }
     //      }
-
     
     while (z<dist) {
       // char estring[MPI_MAX_ERROR_STRING];
@@ -318,10 +319,7 @@ void main(int argc, char *argv[]) {
           //printf("DEBUG: Receiving values from rank 1 and 2!\n");
           if (mpirank==1) {
               //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-              recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);   
-              printf("A[268959744]=%f\n",A[268959744]);
-              printf("A[10]=%f\n",A[10]);
-              printf("A[100]=%f\n",A[100]);
+              recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);      
             //FILE *this1;
             //this1 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/poh.bin","wb");
             //fwrite(A, sizeof(complex double), dims[2]*dims[1]*dims[0], this1);
@@ -352,9 +350,6 @@ void main(int argc, char *argv[]) {
         if (mpirank==3) {
             //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);
-                        printf("A[268959744]=%f\n",A[268959744]);
-    printf("A[10]=%f\n",A[10]);
-    printf("A[100]=%f\n",A[100]);
             //printf("DEBUG: Received done at rank %d\n",mpirank);
         }
         MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -380,8 +375,6 @@ void main(int argc, char *argv[]) {
         //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
         //ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 1, mpirank);
       if (mpirank==0) {
-            printf("C1[268959744]=%f\n",C1[268959744]);
-            printf("C2[268959744]=%f\n",C2[268959744]);
         setStep(dims, &dzz, C1, C2, def_err, dzmin, y1, y2, &bad, &err);
 
        // if (dr>(y1[1]+y2[1])/2.0) {
@@ -389,25 +382,25 @@ void main(int argc, char *argv[]) {
        //     exit(0);
        // }
       
-      for (i=1;i<5;i++) {
+        for (i=1;i<5;i++) {
              MPI_Send(&bad, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
           }
       }
       if (mpirank>0) {
          MPI_Recv(&bad, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
       }
-      if (bad==1) {
-         continue;
-      }
+        if (bad==1) {
+           continue;
+        }
       else {
         if (mpirank==0) {
             #pragma omp parallel for 
-            for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
+                for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
                     A[i] = (4.0/3.0)*C2[i] -(1.0/3.0)*C1[i];
-            }
+                }
+            
             z = z+2.0*dzz;
             memset(temp, 0, dims[2] * sizeof(double));
-
             #pragma omp parallel sections
             {
             #pragma omp section
@@ -438,6 +431,7 @@ void main(int argc, char *argv[]) {
                 }
                 } 
             }
+            printf("Writing to files\n");
             #pragma omp parallel sections
             {
                 #pragma omp section 
@@ -472,37 +466,57 @@ void main(int argc, char *argv[]) {
             }
 
             printf("We are here: %5.2f\n", z*100.0/dist );
+            
             if (mpirank == 0) {
-                if ((nstep%20)==0) {
-                    printf("We are at step %d, writing checkpoint data into file.\n", nstep );
+                if ((nstep%10)==0) {
+                    printf("We are at step %d, writing checkpoint data into files.\n", nstep );
                     //double *Ar, *Ai;
                     //for (i=0;i<dims[0]*dims[1]*dims[2];i++)
                     //Ar[i] = creal(A[i]);
                     //Ai[i] = cimag(A[i]);
-                    fresp = fopen(fresn, "wb");
-                    fwrite(A, sizeof(complex double), dims[0]*dims[1]*dims[2], fresp);
-                    fclose(fresp);
-                    fres2p = fopen(fres2n, "wb");
-                    fwrite(&dzz, sizeof(double), 1, fres2p);
-                    fwrite(&z, sizeof(double), 1, fres2p);
-                    fwrite(&signmem, sizeof(int), 1, fres2p);
-                    fwrite(&puls_e, sizeof(double), 1, fres2p);
-                    fclose(fres2p);
+                    int stepn;
+                    stepn = nstep+1;
+                    fresdp = fopen(fresdn, "wb");
+                    fwrite(A, sizeof(complex double), dims[0]*dims[1]*dims[2], fresdp);
+                    fclose(fresdp);
+                    frespp = fopen(frespn, "wb");
+                    fwrite(&dzz, sizeof(double), 1, frespp);
+                    fwrite(&z, sizeof(double), 1, frespp);
+                    fwrite(&signmem, sizeof(int), 1, frespp);
+                    fwrite(&puls_e, sizeof(double), 1, frespp);
+                    fwrite(&stepn, sizeof(int), 1, frespp);
+                    
+                   // printf("%f\n",creal(A[268959760]));
+                   // printf("%f\n",creal(A[268957760]));
+                   // printf("%f\n",dzz);
+                   // printf("%f\n",z);
+                   // printf("%d\n",signmem);
+                   // printf("%f\n",puls_e);
+                   // printf("%d\n",stepn);
+                                        
+                    fclose(frespp);
+                    
+                    backup(fbp1p);
+                    backup(fbp2p);
+                    backup(ftemp);
+                    backup(fspep);
+                    backup(fothp);
                 }
             }
+
+            nstep++;
             //exit(0);
             //if (nstep == 1)
             //{        
             //    z=dist; //csak egy kor
             //}
             //exit(0);
-            nstep++;
             }
         }
       MPI_Barrier(MPI_COMM_WORLD);
     }
 if (mpirank == 0) { 
-    fwrite(A, sizeof(complex double), dims[0]*dims[1]*dims[2], foutp);
+    fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], foutp);
     fclose(fbp1p);
     fclose(fbp2p);
     fclose(ftemp);
@@ -539,7 +553,52 @@ MPI_Finalize();
 return;
 }
         
-   
+void backup(FILE* fp) {
+    int fd;
+    char* buffer = malloc(PATH_MAX);
+    char* path = malloc(PATH_MAX);
+    
+    fd = fileno(fp);
+    snprintf(buffer, PATH_MAX, "/proc/self/fd/%d", fd);
+    memset(path, 0, PATH_MAX);
+    readlink(buffer, path, PATH_MAX-1);
+    
+    free(buffer);
+    
+    copyfile(path, 0);
+    
+    free(path);
+}
+
+void restore(const char* path) {
+    copyfile(path, 1);
+}
+
+void copyfile(const char* path, int dorestore) {
+    char* buffer = malloc(2*strlen(path) + 9);
+    if (dorestore) {
+        sprintf(buffer, "cp %s.bak %s", path, path);
+    } else {
+        sprintf(buffer, "cp %s %s.bak", path, path);
+    }
+    system(buffer);
+    free(buffer);
+}
+
+FILE* opener(const char* cpath, const char* fname, const char* fopts, int dorestore) {
+    char* path;
+    FILE* fp;
+    
+    // create pathname and open file
+    path = malloc(strlen(cpath) + strlen(fname) + 2);
+    sprintf(path, "%s/%s", cpath, fname);
+    if (dorestore) restore(path);
+    fp = fopen(path, fopts);
+    free(path);
+    
+    return fp;
+}
+
 void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char* gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change, int mpirank) {   
    
     int i, j, k;
@@ -550,8 +609,9 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
     A_nl = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     
-    if (mpirank==1 || mpirank==3){
-        
+    //double sum;
+    
+    if (mpirank==1 || mpirank==3){        
         //printf("DEBUG: Allocating memory for ssfm...rank: %d\n", mpirank);
         exp_D0 = (double complex*)malloc(dims[2] * sizeof(double complex));
         expR = (double complex*)malloc(dims[0] * sizeof(double complex));
@@ -588,7 +648,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
             }
 
         fftw_execute_dft(pTifft, A, A);
-
+        //printf("%f\n",creal(A[268959760]));
         fftw_execute_dft(pR2fft, A, A);
 
         #pragma omp simd collapse(3) 
@@ -644,20 +704,20 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
         memcpy (wbuff, w, dims[2] * sizeof(double) );
         #pragma omp parallel for
             for (k=0; k<dims[2]/2; k++) {
-                w[k] = wbuff[dims[2]/2+k];
-                w[dims[2]/2+k] = wbuff[k];
+                wbuff[k] = w[dims[2]/2+k];
+                wbuff[dims[2]/2+k] = w[k];
             }
-        free(wbuff);
+        
         fftw_execute_dft(pTfft, buffer, buffer);
         #pragma omp parallel for collapse(2)
         for (k=0; k<dims[2]; k++) {
                for (i=0; i<dims[0]*dims[1]; i++) {
-                   dA[k*dims[0]*dims[1]+i] = -1.0*I * buffer[k*dims[0]*dims[1]+i] * w[k]; //conj v no conj for w???
+                   dA[k*dims[0]*dims[1]+i] = -1.0*I * buffer[k*dims[0]*dims[1]+i] * wbuff[k];
                }
         }
-
+        free(wbuff);
         fftw_execute_dft(pTifft, dA, dA);
-
+       //printf("%f\n",creal(A[268959760]));
        
       //  FILE *this4;
        // this4 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/withoutfftshift.bin","wb");
@@ -681,6 +741,11 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
        else {
            memset(buffer, 0, dims[0]*dims[1]*dims[2] * sizeof(complex double));
        }
+      // sum=0;
+      // for (i = 0; i<dims[0]*dims[1]*dims[2]; i++) { 
+       //    sum += pow(cabs(A[i]), 2); 
+        //} 
+        //printf("Sum a plasm elott = %f, rank %d\n ", sum, mpirank);
     }
    // MPI_Barrier(MPI_COMM_WORLD);
     if (plasm == 1) {
@@ -763,7 +828,11 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
        }
 
        fftw_execute_dft(pTifft, A, A);
-
+     //  sum=0;
+      // for (i = 0; i<dims[0]*dims[1]*dims[2]; i++) { 
+      //      sum += pow(cabs(A[i]), 2); 
+      //  } 
+      // printf("Sum plasm utan = %f, rank %d\n ", sum, mpirank);
        fftw_execute_dft(pR2fft, A, A);
 
        #pragma omp simd collapse(3)
@@ -840,7 +909,6 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
                    calc1oes(BP2, dims, r, bps2, y2);
            }
         }
-    
        // FILE *this1;
        // this1 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/ion.bin","wb");
        // fwrite(A, sizeof(double), 2*dims[0]*dims[1]*dims[2], this1);
@@ -993,7 +1061,12 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     datpuls = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     W_adk1 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
     W_adk2 = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-        
+   // double sum; 
+   // sum=0;
+   // for (i = 0; i<dims[0]*dims[1]*dims[2]; i++) { 
+   //     sum += pow(cabs(A[i]), 2); 
+   // } 
+   // printf("Sum a plasmaban calc elott = %f\n ", sum);
     #pragma omp parallel for private(i)
     for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
         Ip[i] = pow(cabs(A[i]),2)*HBAR*w0;
@@ -1011,6 +1084,14 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
         E0[i] = sqrt(2.0*ZW0*Ip[i]/NC)*FCTR; // FCTR needs to be here due to the resolution
         datpuls[i] = fabs(E0[i])/EF;   
     }
+    
+   // sum=0;
+   // for (i = 0; i<dims[0]*dims[1]*dims[2]; i++) { 
+    //    sum += pow(cabs(E0[i]), 2); 
+   // } 
+    //printf("E0sum = %f\n ", sum);
+    
+    
     
     /* Ionization rates */
 
@@ -1062,6 +1143,11 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     K1 = 2.0 * pow(EL0,2.0);
     K2 = 4.0*pow(ME,2.0);
     K3 = sigm_coll*rho_nt;
+    //printf("K3 = %f\n ", K3);
+    //printf("K2 = %f\n ", K2);
+    //printf("K1 = %f\n ", K1);
+    //printf("w0 = %f\n ", w0);
+    //printf("w[45] = %f\n ", w[45]);
     K4 = k0/(n0*rho_c)*w0;
     K5 = pow(w0,2);
     #pragma omp parallel for collapse(2) private(ve)
@@ -1076,7 +1162,11 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     
     free(Ip);
     free(E0);
-    
+   //     sum=0;
+   // for (i = 0; i<dims[0]*dims[1]*dims[2]; i++) { 
+    //    sum += tau_c[i]; 
+    //} 
+    //printf("tauce = %f\n ", sum);
     //for (int i=0; i<dims[1]*dims[0]; i++) {
     //    Rateint[i] = 0.0;
     //}      
@@ -1099,7 +1189,7 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     free(W_ava1);
     free(W_adk1);
     free(W_adk2);
-    
+       
     #pragma omp parallel for
     for (i=0; i<dims[2]*dims[1]*dims[0]; i++) {
         freeelectrons_sp[i] = (ions1[i]*1.0+ions2[i]*2.0)*sigma_pla[i];
@@ -1341,8 +1431,8 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
    //Write out wisdom, uncomment for new hardware.
    //if (readnotwrite==1)
    //if (dims[0]==1024) {
-       const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata3/wisdom1024";
-       fftw_export_wisdom_to_filename(bop);
+   //    const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom1024";
+   //    fftw_export_wisdom_to_filename(bop);
    //}
    //exit(0);
    //
@@ -1362,16 +1452,18 @@ void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, dou
     *bad = 0;
     sum1 = 0;
     sum2 = 0;
+    //sum3 = 0;
 
 
     //#pragma omp parallel for default(shared) reduction(+:sum1, sum2)  //try private i?
     for (i = 0; i<dims[0]*dims[1]*dims[2]; i++) { 
         sum1 += pow(cabs(C2[i]-C1[i]), 2); 
         sum2 += pow(cabs(C2[i]), 2); 
+        //sum3 += pow(cabs(C1[i]), 2); 
         } 
     
     *err = sqrt(sum1)/sqrt(sum2);
-    printf("Sum1 = %f, Sum2 = %f\n ", sum1, sum2);
+    //printf("Sum1 = %f, Sum2 = %f, Sum3 = %f\n ", sum1, sum2, sum3);
     printf("With step size: %.4f, the local error is: %.8g\nThe defined error is:%.8g\n ", *dzz, *err, def_err);
 
     err_fact = pow(2.0,(1.0/3.0)); //Split-step error
