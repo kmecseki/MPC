@@ -9,6 +9,8 @@
 #include <time.h>
 #include <mpi.h>
 #include <limits.h>
+#include <getopt.h>
+#include <unistd.h>
 
 #define ZW0 377.0
 #define NC 1.0  // refractive index (set to 1)
@@ -69,9 +71,30 @@ void main(int argc, char *argv[]) {
     MPI_Get_processor_name(processor_name, &name_len);
     printf("Starting up! hostname: %s,mpirank: %d\n",processor_name, mpirank);
     
-    //const char *cpath = "/global/homes/k/kmecseki/broad/data";  //nersc
-    const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata2"; 
+    
+    //const char *dir = "/global/homes/k/kmecseki/MPC/data";  //nersc
+    const char *dir = "/reg/d/psdm/xpp/xpp12216/results/MCPdataNERSC"; 
     //const char *cpath = "/reg/neh/home/kmecseki/broad3/3Dfortest/3D/files/data/"; 
+    
+    char *cpath = malloc(strlen(dir)+10); //5 + safety margin
+    int nrun = 0;
+    
+    while ((cup = getopt (argc, argv, "rn:")) != -1)
+       switch(cup)
+       {
+         case 'r':
+          resume = 1;
+          printf("Resuming previous run!\n");
+          break;
+         case 'n':
+          nrun = atoi(optarg);
+	  break;
+          default:
+          abort();
+       }
+
+    sprintf(cpath, "%s%04d", dir, nrun);
+    
     int dims[3];  
     
     FILE *fparp;
@@ -84,20 +107,9 @@ void main(int argc, char *argv[]) {
     double complex *C1, *C2;
     
   if (mpirank == 0) { 
+      printf("Using directory %s\n", cpath);
       printf("Matrix dimensions are: %d x %d x %d. \n", dims[0],dims[1],dims[2]);
-
-      while ((cup = getopt (argc, argv, "r")) != -1)
-          switch(cup)
-          {
-           case 'r':
-           resume = 1;
-           printf("Resuming previous run!\n");
-           break;
-
-           default:
-           abort();
-          }
-   
+  
     C1 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     C2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
     
@@ -279,13 +291,16 @@ void main(int argc, char *argv[]) {
    //     bro[i] = creal(A[i]);
  //   }
     //      }
-    
+    clock_t start, end;
+    double cpu_time_used;
+
     while (z<dist) {
       // char estring[MPI_MAX_ERROR_STRING];
        //MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN);
       // int error, len, eclass;
        
       if (mpirank == 0) {
+          start = clock();	
         //#pragma omp parallel
         //{
         //        memcpy(C1, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
@@ -502,6 +517,9 @@ void main(int argc, char *argv[]) {
                     backup(fspep);
                     backup(fothp);
                 }
+		end = clock();
+		cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+		printf("One step took %f\n", cpu_time_used);
             }
 
             nstep++;
@@ -541,6 +559,7 @@ free(w);
 free(r);
 free(BP1);
 free(BP2);
+free(cpath);
       
 if (mpirank == 0) { 
    free(C1);
@@ -709,6 +728,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
             }
         
         fftw_execute_dft(pTfft, buffer, buffer);
+        // MISTAKE WAS HERE, NEED TO DOUBLE CHECK STUFF!!!! w got mangled before, now it is "fixed", make sure it was good as it was for other calcs.
         #pragma omp parallel for collapse(2)
         for (k=0; k<dims[2]; k++) {
                for (i=0; i<dims[0]*dims[1]; i++) {
