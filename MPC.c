@@ -73,7 +73,7 @@ void main(int argc, char *argv[]) {
     
     
     //const char *dir = "/global/homes/k/kmecseki/MPC/data";  //nersc
-    const char *dir = "/reg/d/psdm/xpp/xpp12216/results/MCPdataNERSC"; 
+    const char *dir = "/reg/d/psdm/xpp/xpp12216/results/MCPD"; 
     //const char *cpath = "/reg/neh/home/kmecseki/broad3/3Dfortest/3D/files/data/"; 
     
     char *cpath = malloc(strlen(dir)+10); //5 + safety margin
@@ -146,7 +146,7 @@ void main(int argc, char *argv[]) {
     int change, bad;
         
     double *betas, *wr, *w, *r, *temp, *spec;
-    double dist, dzz, alpha, err, def_err, dzmin, dr;
+    double dist, dzz, alpha, err, def_err, dzmin, dr, Esig, Ksn;
     double Cav, k0;
     fftw_plan pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft;
     double gamma2, w0, deltat, rho_c, rho_nt, n0, puls_e, Ab_M;
@@ -219,12 +219,21 @@ void main(int argc, char *argv[]) {
     fread(&dr, sizeof(double),1,fparp);
     fread(&def_err, sizeof(double),1,fparp);
     fread(&dzmin, sizeof(double),1,fparp);
+    fread(&Esig, sizeof(double),1,fparp);
     fread(gas, sizeof(char),9,fparp);
+    
     
    // printf("w[45] = %f, from rank = %d\n\n", w[45], mpirank);
     
     fclose(fparp);
     if (mpirank == 0) {
+        printf("\bDone!\n");
+        printf("Calibrating energy...\n");
+        Ksn = sqrt(puls_e/Esig);
+        #pragma omp parallel for
+        for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
+            A[i] = Ksn * A[i];
+        }
         printf("\bDone!\n");
     }
     if (mpirank == 0) {
