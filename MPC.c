@@ -73,10 +73,12 @@ void main(int argc, char *argv[]) {
     
     
     //const char *dir = "/global/homes/k/kmecseki/MPC/data";  //nersc
-    const char *dir = "/reg/d/psdm/xpp/xpp12216/results/MCPD"; 
+    const char *dir = "/reg/d/psdm/xpp/xpp12216/results/MCPD"; // this is where param etc are, this will get the 000n suffix
+    const char *cpath2 = "/reg/d/psdm/xpp/xpp12216/results/MCPD"; // This is where the datai and datar are.
     //const char *cpath = "/reg/neh/home/kmecseki/broad3/3Dfortest/3D/files/data/"; 
     
     char *cpath = malloc(strlen(dir)+10); //5 + safety margin
+    //char *cpath2 = malloc(strlen(dir)+2); // this stays
     int nrun = 0;
     
     while ((cup = getopt (argc, argv, "rn:")) != -1)
@@ -129,8 +131,8 @@ void main(int argc, char *argv[]) {
         fothp = opener(cpath, "other.bin", "a" ,1);
     }
     else {
-        fmarp = opener(cpath, "datar.bin", "r", 0);
-        fmaip = opener(cpath, "datai.bin", "r", 0);
+        fmarp = opener(cpath2, "datar.bin", "r", 0);
+        fmaip = opener(cpath2, "datai.bin", "r", 0);
         fbp1p = opener(cpath, "bp1.bin",   "wb",0);
         fbp2p = opener(cpath, "bp2.bin",   "wb",0);
         ftemp = opener(cpath, "temp.bin",  "wb",0);
