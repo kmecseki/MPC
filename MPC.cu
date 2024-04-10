@@ -28,7 +28,7 @@
 #define READWIS 1 // read existing wisdom for FFT
 
 /* To use GPU for FFT as well */
-#if USEGPU == 0
+#if USEGPU == 1
 #include <cufft.h>
 typedef cufftHandle fftw_plan;
 #define fftw_destroy_plan cufftDestroy
@@ -38,16 +38,6 @@ typedef fftw_complex cufftDoubleComplex;
 typedef fftw_complex cuDoubleComplex;
 #endif
 
-/* MSVC Compatibility */
-//typedef double _Complex complex double
-
-/* Compilation at SLAC*/
-// afs/slac/package/intel_tools/2015u2/bin/icc -o fullrun4 -O3 -lfftw3_threads -lfftw3 -lpthread -openmp source_code_name.c
-// mpicc -o MCPSim -O3 -lm -lfftw3_threads -lfftw3 -lpthread MPC_code_v20200915MPI.c
-// current wisdom created on psanagpu111
-// nersc, module load cray-fftw, module load openmpi
-// mpicc -o MCPSim1024 -I$FFTW_ROOT/include -L$FFTW_ROOT/lib -O3 -qopenmp -lfftw3_threads -lfftw3 -lpthread MPC_code_v20200920nersc.c
-// nvcc MPC.c -lfftw3 -I/usr/lib/x86_64-linux-gnu/openmpi/include -I/usr/lib/x86_64-linux-gnu/openmpi/include/openmpi -L/usr/lib/x86_64-linux-gnu/openmpi/lib -lmpi
 
 void ionizpot(const char* gas, double *I1, double *I2);
 void ADK(double *ionizationrates1, double *ionizationrates2, int *dims, double *C_nl, double *f_lm, double *nq, double *mq, double *Ei, double *E);
@@ -101,18 +91,9 @@ int main(int argc, char *argv[]) {
         mpirank = 0;
     }
     
-    /* Uncomment for NERSC */
-    //const char *cpath2 = "/global/homes/k/kmecseki/broad/data";
-    //const char *dir = "/global/homes/k/kmecseki/broad/data";
-    const char *cpath2 = "/home/kmecseki/codes/C/MPC2/MPC";
-    const char *dir = "/home/kmecseki/codes/C/MPC2/MPC";
-    
-    /* Uncomment for psana at SLAC */
-    //const char *dir = "/reg/d/psdm/xpp/xpp12216/results/MCPD";
-    //const char *cpath2 = "/reg/d/psdm/xpp/xpp12216/results/MCPD"; 
-    
-    /* Uncommment for NEH cluster */
-    //const char *cpath = "/reg/neh/home/kmecseki/broad3/MCP/3D/data/";
+    /* For NEH cluster */
+    const char *dir = "/reg/neh/home/kmecseki/broad3/MCP/3D/data";
+    const char *cpath2 = "/reg/neh/home/kmecseki/broad3/MCP/3D/data";
     
     char *cpath = (char *) malloc(strlen(dir)+10);
     unsigned int nrun = 0;
@@ -147,7 +128,7 @@ int main(int argc, char *argv[]) {
     char fresdn[lgt], frespn[lgt];
     
     cufftDoubleComplex *C1, *C2;
-    
+
     if (mpirank == 0) { 
         printf("Using directory %s\n", cpath);
         printf("Matrix dimensions are: %d x %d x %d. \n", dims[0], dims[1], dims[2]);
@@ -688,12 +669,22 @@ void restore(const char* path) {
 void copyfile(const char* path, int dorestore) {
 
     char* buffer = (char *)malloc(2 * strlen(path) + 9);
+    if (!buffer) {
+        fprintf(stderr,"Memory allocation failed in copyfile function");
+        free(buffer);
+        exit(1);
+    }
     if (dorestore) {
         sprintf(buffer, "cp %s.bak %s", path, path);
     } else {
         sprintf(buffer, "cp %s %s.bak", path, path);
     }
     system(buffer);
+    if (system(buffer) == -1) {
+        fprintf(stderr,"Error executing system command");
+        free(buffer);
+        exit(1);
+    }
     free(buffer);
 }
 
@@ -704,11 +695,18 @@ FILE* opener(const char* cpath, const char* fname, const char* fopts, int dorest
     
     // create pathname and open file
     path = (char *)malloc(strlen(cpath) + strlen(fname) + 2);
+    if (!path) {
+        fprintf(stderr, "Memory allocation failed in opener function\n");
+        exit(1);
+    }
     sprintf(path, "%s/%s", cpath, fname);
     if (dorestore) restore(path);
     fp = fopen(path, fopts);
+    if (!fp) {
+        fprintf(stderr, "Failed to open file: %s\n", path);
+        exit(1);
+    }
     free(path);
-    
     return fp;
 }
 
@@ -753,7 +751,7 @@ __device__ __forceinline__  double cexpCUDAi(cuDoubleComplex z) {
     double real = cuCreal(z);
     double imag = cuCimag(z);
     double exp_real = exp(real);
-    return exp_real * sin(imag));
+    return exp_real * sin(imag);
 }
 
 
