@@ -1,4 +1,5 @@
 #include "plasma.h"
+#include "constants.h"
 
 void ionizpot(const char* gas, double *I1, double *I2) {
     
