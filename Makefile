@@ -1,4 +1,5 @@
 NVCC = NVCC
+
 CFLAGS = -I/usr/lib/x86_64-linux-gnu/openmpi/include \
          -I/usr/lib/x86_64-linux-gnu/openmpi/include/openmpi \
          -L/usr/lib/x86_64-linux-gnu/openmpi/lib \
