@@ -1,91 +1,110 @@
 #define _USE_MATH_DEFINES
+#include <fftw3.h>
 #include <math.h>
 #include <complex.h>
-#include <fftw3.h>
+#include <cufft.h>
 #include <string.h>
 #include <stdlib.h>
-#include <pthread.h>
+//#include <pthread.h>
 #include <omp.h>
 #include <time.h>
 #include <mpi.h>
 
-#define ZW0 377.0
-#define NC 1.0  // refractive index (set to 1)
+#define ZW0 377.0 // free space impedance
+#define NC 1.0  // refractive index (set to 1 - air)
 #define FCTR 0.89 // factor to account for no electric field oscillations 
-#define IH 27.21
-#define EF 5.14220642e11
-#define ME 9.1094e-31
-#define EL0 1.602e-19
-#define NAVO 6.02214e+23
-#define T0 2.4188843265e-17    
-#define C0 300000000.0
-#define HBAR 1.054560652926899e-34
-#define PROC 16
+#define IH 27.21 // ionization E for H
+#define EF 5.14220642e11 // elec. field constant V/m
+#define ME 9.1094e-31 // el mass
+#define EL0 1.602e-19 // el charge
+#define NAVO 6.02214e+23 // Avogadro num
+#define T0 2.4188843265e-17  // atomic unit of time  
+#define C0 299792458.0 // speed of light
+#define HBAR 1.054560652926899e-34 // Planck
+#define PROC 16 // num processors to use
 
-////afs/slac/package/intel_tools/2015u2/bin/icc -o fullrun4 -O3 -lfftw3_threads -lfftw3 -lpthread -openmp source_code_name.c
-////mpicc -o MCPSim -O3 -lm -lfftw3_threads -lfftw3 -lpthread MPC_code_v20200915MPI.c
-/// current wisdom created on psanagpu111
+#define USEGPU 1 // Only for low res runs, set to 0 for MPI
+
+/* MSVC Compatibility */
+typedef double _Complex complex_double
+
+/* Compilation at SLAC*/
+// afs/slac/package/intel_tools/2015u2/bin/icc -o fullrun4 -O3 -lfftw3_threads -lfftw3 -lpthread -openmp source_code_name.c
+// mpicc -o MCPSim -O3 -lm -lfftw3_threads -lfftw3 -lpthread MPC_code_v20200915MPI.c
+// current wisdom created on psanagpu111
 // nersc, module load cray-fftw, module load openmpi
 // mpicc -o MCPSim1024 -I$FFTW_ROOT/include -L$FFTW_ROOT/lib -O3 -qopenmp -lfftw3_threads -lfftw3 -lpthread MPC_code_v20200920nersc.c
 
 
 void ionizpot(const char* gas, double *I1, double *I2);
 void ADK(double *ionizationrates1, double *ionizationrates2, int *dims, double *C_nl, double *f_lm, double *nq, double *mq, double *Ei, double *E);
-void Natoms(const char *gas, double *Natm, double *sigm_coll); 
-void calcexpR(complex double *expR, int *signmem, double z, double Cav, double k0, double dzz, double *wr, int *dims);
-void fftshift(complex double *in, int *dims, complex double *buffer, int axis);
-void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, double *tau_c, double *freeelectrons);
+void Natoms(const char *gas, double *Natm, double *sigm_coll);
+void calcexpR(complex_double *expR, int *signmem, double z, double Cav, double k0, double dzz, double *wr, int *dims);
+void fftshift(complex_double *in, int *dims, complex_double *buffer, int axis);
+void ioniz(complex_double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, double *tau_c, double *freeelectrons);
 void calc1oes (double *BP, int *dims, double *r, double *vald1oes, double *y);
-void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char *gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change, int mpirank);
+void ssfmprop(complex_double *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char *gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change, int mpirank);
 void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR2fft, fftw_plan *pR2ifft, fftw_plan *pTfft, fftw_plan *pTifft);
-void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err);
-void sendmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankto);
-void recmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankfrom);
+void setStep(int *dims, double *dzz, complex_double *C1, complex_double *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err);
+void sendmpi(complex_double *A, MPI_Datatype datatype, int *dims, int rankto);
+void recmpi(complex_double *A, MPI_Datatype datatype, int *dims, int rankfrom);
 
 void main(int argc, char *argv[]) {
     
-    //MPI_Init(&argc, &argv);
-    int provided;
-    int lgt;
-    lgt = 80;
-    double z;
-    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
-    if (provided != MPI_THREAD_FUNNELED) {
-        fprintf(stderr, "Warning MPI did not provide MPI_THREAD_FUNNELED\n");
-        exit(0);
+    int mpirank;
+    if (!USEGPU) {
+        /* Setting up MPI */
+        int provided;
+        MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
+        if (provided != MPI_THREAD_FUNNELED) {
+            fprintf(stderr, "Warning MPI did not provide MPI_THREAD_FUNNELED\n");
+            exit(0);
+        }
+        int mpisize;
+        MPI_Comm_size(MPI_COMM_WORLD, &mpisize);
+        MPI_Comm_rank(MPI_COMM_WORLD, &mpirank);
+        char processor_name[MPI_MAX_PROCESSOR_NAME];
+        int name_len;
+        MPI_Get_processor_name(processor_name, &name_len);
+        printf("Starting up! hostname: %s, mpirank: %d\n", processor_name, mpirank);
     }
-    int mpisize, mpirank;
-    MPI_Comm_size(MPI_COMM_WORLD, &mpisize);
-    MPI_Comm_rank(MPI_COMM_WORLD, &mpirank);
-    char processor_name[MPI_MAX_PROCESSOR_NAME];
-    int name_len;
-    MPI_Get_processor_name(processor_name, &name_len);
-    printf("Starting up! hostname: %s,mpirank: %d\n",processor_name, mpirank);
+    else {
+        /* Using CUDA */
+        mpirank = 0;
+    }
     
+    /* Uncomment for NERSC */
     //const char *cpath = "/global/homes/k/kmecseki/broad/data";  //nersc
-    const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata3"; 
-    //const char *cpath = "/reg/neh/home/kmecseki/broad3/3Dfortest/3D/files/data/"; 
-    int dims[3];  
+
+    /* Uncomment for psana at SLAC */
+    const char *cpath = "/reg/d/psdm/xpp/xpp12216/results/MCPdata"; 
     
+    /* Uncommment for NEH cluster */
+    //const char *cpath = "/reg/neh/home/kmecseki/broad3/MCP/3D/data/"; 
+    
+    unsigned int dims[3];  
     FILE *fparp;
-    char fparn[lgt];
+    const int lgt = 80;
+    const char fparn[lgt];
     
     snprintf(fparn, lgt, "%s/%s", cpath, "param.bin"); 
-    fparp = fopen(fparn,"r");
-    fread(dims, sizeof(int),3,fparp);
-        
+    /* Open parameter file */
+    fparp = fopen(fparn, "r");
+    fread(dims, sizeof(int), 3, fparp);
+    
+    /* Output files */
     FILE *fmarp, *fmaip, *fbp1p, *fbp2p, *ftemp, *fspep, *fothp, *foutp;
-    char fmarn[lgt], fmain[lgt], fbp1n[lgt], fbp2n[lgt], ftemn[lgt], fspen[lgt], fothn[lgt], foutn[lgt];
+    const char fmarn[lgt], fmain[lgt], fbp1n[lgt], fbp2n[lgt], ftemn[lgt], fspen[lgt], fothn[lgt], foutn[lgt];
     
-    double complex *C1, *C2;
+    complex_double *C1, *C2;
     
-    if (mpirank == 0) { 
-        printf("Matrix dimensions are: %d x %d x %d. \n", dims[0],dims[1],dims[2]);
 
-        C1 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-        C2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+    if (mpirank == 0) { 
+        printf("Matrix dimensions are: %d x %d x %d. \n", dims[0], dims[1], dims[2]);
+
+        C1 = (complex_double *) malloc(dims[0] * dims[1] * dims[2] * sizeof(complex_double));
+        C2 = (complex_double *) malloc(dims[0] * dims[1] * dims[2] * sizeof(complex_double));
     
-        //const char *cpath = "/tmp/tmp.A4EplIZ4xJ/"; 
         snprintf(fbp1n, lgt, "%s/%s", cpath, "bp1.bin");
         snprintf(fbp2n, lgt, "%s/%s", cpath, "bp2.bin");
         snprintf(ftemn, lgt, "%s/%s", cpath, "temp.bin");
@@ -106,24 +125,24 @@ void main(int argc, char *argv[]) {
     }
     
     char gas[9];
-    double complex *A;
-    int i, k, nstep;
-    int signmem, sst_on, plasm;
-    int change, bad;
-        
-    double *betas, *wr, *w, *r, *temp, *spec;
-    double dist, dzz, alpha, err, def_err, dzmin, dr;
+    int i, k;
+    int sst_on, plasm;
+    int change;
+
+    double dist, dzz, alpha, def_err, dzmin, dr;
     double Cav, k0;
     fftw_plan pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft;
     double gamma2, w0, deltat, rho_c, rho_nt, n0, puls_e, Ab_M;
     double bps1 = 0.0, bps2 = 0.0;
     double y1[4], y2[4];
-    double *BP1, *BP2;
     
-    if (mpirank == 0) {
+    if ((mpirank == 0)  && (!USEGPU)) {
         printf("DEBUG: Allocating memory on all nodes...\n");
     }
-    A = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+
+    complex_double *A;
+    double *betas, *wr, *w, *r, *BP1, *BP2;
+    A = (complex_double *)malloc(dims[0] * dims[1] * dims[2] * sizeof(complex_double));
     betas = (double *)malloc(dims[2] * sizeof(double));
     wr = (double *)malloc(dims[1] * sizeof(double));
     w = (double *)malloc(dims[2] * sizeof(double));
@@ -131,22 +150,23 @@ void main(int argc, char *argv[]) {
     BP1 = (double *)malloc(dims[0] * sizeof(double));
     BP2 = (double *)malloc(dims[1] * sizeof(double));
     
+    double *temp, *spec;
     if (mpirank == 0) { 
         double *Ar, *Ai;
-        Ar = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-        Ai = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
+        Ar = (double *)malloc(dims[0] * dims[1] * dims[2] * sizeof(double));
+        Ai = (double *)malloc(dims[0] * dims[1] * dims[2] * sizeof(double));
         temp = (double *)malloc(dims[2] * sizeof(double));
         spec = (double *)malloc(dims[2] * sizeof(double));
     
         printf("Now reading in data matrix...\n");
-        fread(Ar, sizeof(double),dims[0]*dims[1]*dims[2],fmarp);
-        fread(Ai, sizeof(double),dims[0]*dims[1]*dims[2],fmaip);
+        fread(Ar, sizeof(double), dims[0] * dims[1] * dims[2], fmarp);
+        fread(Ai, sizeof(double), dims[0] * dims[1] * dims[2], fmaip);
         fclose(fmaip);
         fclose(fmarp);
         
         #pragma omp parallel for
-        for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-            A[i] = Ar[i] + I*Ai[i];
+        for (i = 0; i < dims[0] * dims[1] * dims[2]; ++i) {
+            A[i] = Ar[i] + I * Ai[i];
         }
         free(Ar);
         free(Ai);
@@ -157,29 +177,30 @@ void main(int argc, char *argv[]) {
         printf("Now reading in parameters...\n");
     }
 
-    fread(&dist, sizeof(double),1,fparp);
-    fread(&dzz, sizeof(double),1,fparp);
-    fread(betas, sizeof(double),dims[2],fparp);
-    fread(&alpha, sizeof(double),1,fparp);
-    fread(&Cav, sizeof(double),1,fparp);
-    fread(&k0, sizeof(double),1,fparp);
-    fread(wr, sizeof(double),dims[1],fparp);
-    fread(&sst_on, sizeof(int),1,fparp);
-    fread(w, sizeof(double),dims[2],fparp);
-    fread(&gamma2, sizeof(double),1,fparp);
-    fread(&w0, sizeof(double),1,fparp);
-    fread(&plasm, sizeof(int),1,fparp);
-    fread(&deltat, sizeof(double),1,fparp);
-    fread(&rho_c, sizeof(double),1,fparp);
-    fread(&rho_nt, sizeof(double),1,fparp);
-    fread(&n0, sizeof(double),1,fparp);
-    fread(&puls_e, sizeof(double),1,fparp);
-    fread(&Ab_M, sizeof(double),1,fparp);
-    fread(r, sizeof(double),dims[1],fparp);
-    fread(&dr, sizeof(double),1,fparp);
-    fread(&def_err, sizeof(double),1,fparp);
-    fread(&dzmin, sizeof(double),1,fparp);
-    fread(gas, sizeof(char),9,fparp);
+    /* reading input parameters */
+    fread(&dist, sizeof(double), 1, fparp);
+    fread(&dzz, sizeof(double), 1, fparp);
+    fread(betas, sizeof(double), dims[2], fparp);
+    fread(&alpha, sizeof(double), 1, fparp);
+    fread(&Cav, sizeof(double), 1, fparp);
+    fread(&k0, sizeof(double), 1, fparp);
+    fread(wr, sizeof(double), dims[1], fparp);
+    fread(&sst_on, sizeof(int), 1, fparp);
+    fread(w, sizeof(double), dims[2], fparp);
+    fread(&gamma2, sizeof(double), 1, fparp);
+    fread(&w0, sizeof(double), 1, fparp);
+    fread(&plasm, sizeof(int), 1, fparp);
+    fread(&deltat, sizeof(double), 1, fparp);
+    fread(&rho_c, sizeof(double), 1, fparp);
+    fread(&rho_nt, sizeof(double), 1, fparp);
+    fread(&n0, sizeof(double), 1, fparp);
+    fread(&puls_e, sizeof(double), 1, fparp);
+    fread(&Ab_M, sizeof(double), 1, fparp);
+    fread(r, sizeof(double), dims[1], fparp);
+    fread(&dr, sizeof(double), 1, fparp);
+    fread(&def_err, sizeof(double), 1, fparp);
+    fread(&dzmin, sizeof(double), 1, fparp);
+    fread(gas, sizeof(char), 9, fparp);
     fclose(fparp);
     
     if (mpirank == 0) {
@@ -190,65 +211,77 @@ void main(int argc, char *argv[]) {
         printf("Creating FFT plans...\n");
     }
     
-    fftw_init_threads();
-    fftw_plan_with_nthreads(PROC);
-    createPlans(dims, &pR1fft, &pR1ifft, &pR2fft, &pR2ifft, &pTfft, &pTifft);
+    if (USEGPU) {
+
+        /* Spatial X axis */
+        if (cufftPlan3d(&pR1fft, dims[0], dims[1], dims[2], CUFFT_R2C) != CUFFT_SUCCESS) {
+            fprintf(stderr, "CUFFT error: Plan creation failed for R1 FFT\n");
+            exit(0);
+        }
+        if (cufftPlan3d(&pR1ifft, dims[0], dims[1], dims[2], CUFFT_C2R) != CUFFT_SUCCESS) {
+            fprintf(stderr, "CUFFT error: Plan creation failed for R1 inverse FFT\n");
+            exit(0);
+        }
+        
+        /* Spatial Y axis */
+        if (cufftPlan3d(&pR2fft, dims[0], dims[1], dims[2], CUFFT_R2C) != CUFFT_SUCCESS) {
+            fprintf(stderr, "CUFFT error: Plan creation failed for R2 FFT\n");
+            exit(0);
+        }
+        if (cufftPlan3d(&pR2ifft, dims[0], dims[1], dims[2], CUFFT_C2R) != CUFFT_SUCCESS) {
+            fprintf(stderr, "CUFFT error: Plan creation failed for R2 inverse FFT\n");
+            exit(0);
+        }
+        
+        /* time-spectrum - "Z" axis */
+        if (cufftPlan3d(&pTfft, dims[0], dims[1], dims[2], CUFFT_R2C) != CUFFT_SUCCESS) {
+            fprintf(stderr, "CUFFT error: Plan creation failed for T FFT\n");
+            exit(0);
+        }
+        if (cufftPlan3d(&pTifft, dims[0], dims[1], dims[2], CUFFT_C2R) != CUFFT_SUCCESS) {
+            fprintf(stderr, "CUFFT error: Plan creation failed for T inverse FFT\n");
+            exit(0);
+        }
+    }
+    else {
+        /* use all processors to speed this up a bit */
+        fftw_init_threads();
+        fftw_plan_with_nthreads(PROC);
+        createPlans(dims, &pR1fft, &pR1ifft, &pR2fft, &pR2ifft, &pTfft, &pTifft);
+    }
+
     if (mpirank == 0) {
         printf("\bDone!\n");
     }
     
-    err = 0;
-    z = 0;
-    bad = 0;
-    signmem = 1;
-    nstep = 0;
-   // printf("\bSending dims to nodes!\n");
-   // MPI_Send(dims, 3, MPI_INT, 1, 0, MPI_COMM_WORLD);
-   // MPI_Send(dims, 3, MPI_INT, 2, 0, MPI_COMM_WORLD);
-   // MPI_Send(dims, 3, MPI_INT, 3, 0, MPI_COMM_WORLD);
-   //
-   //else {
-   //  int node;
-   //  MPI_Comm_rank(MPI_COMM_WORLD, &node);
-   //  MPI_Recv(dims, 3, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-   //  printf("Receiving dims at %d, size: %dx%dx%d\n",node,dims[0],dims[1],dims[2]);     
-   //}
-    MPI_Barrier(MPI_COMM_WORLD);
-    if (mpirank == 0) {
-        printf("\bAll nodes are ready, for loop is starting!\n");
-    }
-   // exit(0);
-   // return;
-    
-    //double *bro;
-    //  bro = (double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(double));
-         
-    //    if (mpirank == 0) {
-    //         #pragma omp parallel for
-    //  for (i=0; i<dims[0]*dims[1]*dims[2]; i++) {
-    //     bro[i] = creal(A[i]);
-    //   }
-    //      }
-    
-    while (z<dist) {
-        // char estring[MPI_MAX_ERROR_STRING];
-        //MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN);
-        // int error, len, eclass;
-       
+    double err = 0; // track error
+    double z = 0; // propagation distance
+    int bad = 0;
+    int signmem = 1; // changes as the pulse travels back and forth
+    int nstep = 0;
+
+    if (!USEGPU) {
+        MPI_Barrier(MPI_COMM_WORLD);
         if (mpirank == 0) {
-            //#pragma omp parallel
-            //{
-            //memcpy(C1, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
-            //memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
-            //}
-            //printf("DEBUG: Sending values from rank 0!\n");
-            //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 1, MPI_COMM_WORLD);
-            sendmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 1);
+            printf("\bAll nodes are ready, for loop is starting!\n");
+        }
+    }
+    else {
+        printf("\bStarting main loop using CUDA!\n")
+    }
+    
+    /* MAIN LOOP STARTS HERE */
+    while (z < dist) {
+               
+        if ((mpirank == 0) && (!USEGPU)) {
+        
+            // printf("DEBUG: Sending values from rank 0!\n");
+            sendmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 1);           
             // printf("DEBUG: One down!\n");
-            //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 3, 3, MPI_COMM_WORLD);
             sendmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 3);
-            // printf("A sent to 1 and 3!\n");
-            for (i=1;i<5;i++) {
+            // printf("DEBUG: A sent to 1 and 3!\n");
+            
+            for (int i = 1; i < 5; ++i) {
                 MPI_Send(&dzz, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
                 MPI_Send(&z, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
                 MPI_Send(&signmem, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
@@ -256,44 +289,35 @@ void main(int argc, char *argv[]) {
             }
             
             MPI_Recv(&signmem, 1, MPI_INT, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            //MPI_Recv(C1, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             recmpi(C1, MPI_C_DOUBLE_COMPLEX, dims, 1);
-            //MPI_Recv(C2, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             recmpi(C2, MPI_C_DOUBLE_COMPLEX, dims, 3);
             MPI_Recv(BP1, dims[0], MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(BP2, dims[1], MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(&y1, 4, MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(&y2, 4, MPI_DOUBLE, 3, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
-      
-        if (mpirank>0 && mpirank<3) { // for rank 1 and 2
-            //printf("DEBUG: Receiving values from rank 1 and 2!\n");
-            if (mpirank==1) {
-                //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        if ((mpirank > 0 && mpirank < 3) && (!USEGPU)) {
+            /* rank 1 and 2 */
+            if (mpirank == 1) {
                 recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);      
-                //FILE *this1;
-                //this1 = fopen("/reg/d/psdm/xpp/xpp12216/results/MCPdata/poh.bin","wb");
-                //fwrite(A, sizeof(complex double), dims[2]*dims[1]*dims[0], this1);
-                //fclose(this1);
-                //exit(0);
-                //return;             
-                //printf("DEBUG: Received done at rank %d\n",mpirank);
             }
-            //MPI_Recv(bro, dims[0]*dims[1]*dims[2], MPI_DOUBLE, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            //MPI_Error_string(error, estring, &len);
-            //printf("Error %d: %s\n", eclass, estring);fflush(stdout);
-          
+
             MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(&z, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(&puls_e, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            
             //one step for C1
             ssfmprop(A, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
-            if (mpirank==1) {
-                //MPI_Send(&signmem, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
-                //MPI_Send(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, 0, MPI_COMM_WORLD);
+            
+            if (mpirank == 1) {
                 sendmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);
             }
+        }
+        if (USEGPU) {
+            /* advance 1 step */
+            ssfmprop(A, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
         }
        
         if (mpirank>2) { // for rank 3 and 4
@@ -301,10 +325,10 @@ void main(int argc, char *argv[]) {
             if (mpirank==3) {
                 //MPI_Recv(A, dims[0]*dims[1]*dims[2], MPI_C_DOUBLE_COMPLEX, 0, mpirank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 recmpi(A, MPI_C_DOUBLE_COMPLEX, dims, 0);
-                printf("A[268959744]=%f\n",A[268959744]);
-                printf("A[10]=%f\n",A[10]);
-                printf("A[100]=%f\n",A[100]);
-                //printf("DEBUG: Received done at rank %d\n",mpirank);
+                //printf("Sanity check A[268959744]=%f\n",A[268959744]);
+                //printf("Sanity check A[10]=%f\n",A[10]);
+                //printf("Sanity check A[100]=%f\n",A[100]);
+                
             }
             MPI_Recv(&dzz, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(&z, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -368,7 +392,7 @@ void main(int argc, char *argv[]) {
                         }
                     }
                     #pragma omp section {
-                        memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex double));
+                        memcpy(C2, A, dims[0]*dims[1]*dims[2]* sizeof(complex_double));
                         memset(spec, 0, dims[2] * sizeof(double));
                         fftw_execute_dft(pTfft, C2, C2);    
                         //fftshift(C2, dims, C1, 3); % This was taking so long I took it out, we can do this in matlab.
@@ -462,37 +486,35 @@ void main(int argc, char *argv[]) {
 }
         
    
-void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char* gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change, int mpirank) {   
+void ssfmprop(complex_double *A, int *dims, int sst_on, double dzz, double *betas, double alpha, int *signmem, double z, double Cav, double k0, double *wr, fftw_plan pR1fft, fftw_plan pR1ifft, fftw_plan pR2fft, fftw_plan pR2ifft, fftw_plan pTfft, fftw_plan pTifft, double *w, double gamma2, double w0, int plasm, double deltat, char* gas, double rho_c, double rho_nt, double n0, double *puls_e, double *r, double *BP1, double *BP2, double *y1, double *y2, double *bps1, double *bps2, double Ab_M, int change, int mpirank) {   
    
-    int i, j, k;
+    int j, k;
     int signum;
     double *freeelectrons_sp;
-    double complex *exp_D0, *buffersmall, *expR, *buffer2, *buffer, *dA, *A_nl;
+    complex_double *exp_D0, *buffersmall, *expR, *buffer2, *buffer, *dA, *A_nl;
     double *tau_c;
-    A_nl = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-    buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+    A_nl = (complex_double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex_double));
+    buffer = (complex_double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex_double));
     
     if (mpirank==1 || mpirank==3){
         
         //printf("DEBUG: Allocating memory for ssfm...rank: %d\n", mpirank);
-        exp_D0 = (double complex*)malloc(dims[2] * sizeof(double complex));
-        expR = (double complex*)malloc(dims[0] * sizeof(double complex));
-        buffersmall = (complex double *)malloc(dims[2] * sizeof(complex double));
-        //buffer2 = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
-        dA = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+        exp_D0 = (complex_double*)malloc(dims[2] * sizeof(complex_double));
+        expR = (complex_double*)malloc(dims[0] * sizeof(complex_double));
+        buffersmall = (complex_double *)malloc(dims[2] * sizeof(complex_double));
+        //buffer2 = (complex_double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex_double));
+        dA = (complex_double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex_double));
         //printf("\bDone!\n");
     
         // Linear step - half step
         // printf("Linear step...\n");
 
         #pragma omp parallel for
-        for (i=0; i<dims[2]; i++) {
-            //exp_D0[i] = exp(creal(dzz/2.0*(I*betas[i]-alpha/2.0)))*(cos(cimag(dzz/2.0*(I*betas[i]-alpha/2.0)))+I*sin(cimag(dzz/2.0*(I*betas[i]-alpha/2.0))));//
-            exp_D0[i] = cexp(dzz/2.0*(I*betas[i]-alpha/2.0));
+        for (int i = 0; i < dims[2]; ++i) {
+            exp_D0[i] = cexp(dzz / 2.0 * (I * betas[i] - alpha / 2.0));
         }
-
         fftshift(exp_D0, dims, buffersmall, 0);
-        calcexpR(expR, signmem, z, Cav, k0, dzz/2, wr, dims); //a fenti ezt helyettesiti csak parallel
+        calcexpR(expR, signmem, z, Cav, k0, dzz / 2, wr, dims); // parallel replacement for above
 
         //exit(0);
         //FILE *this1;
@@ -603,7 +625,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
         }
         
         else {
-            memset(buffer, 0, dims[0]*dims[1]*dims[2] * sizeof(complex double));
+            memset(buffer, 0, dims[0]*dims[1]*dims[2] * sizeof(complex_double));
         }
     }
     // MPI_Barrier(MPI_COMM_WORLD);
@@ -725,7 +747,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
         //fclose(this3);
         //exit(0);
 
-        //memcpy(temp, A, dims[2]*dims[1]*dims[0]* sizeof(complex double)); 
+        //memcpy(temp, A, dims[2]*dims[1]*dims[0]* sizeof(complex_double)); 
         //        FILE *this2;
         //this2 = fopen("/tmp/tmp.fSt7RsB2I8/utana.bin","wb");
         //fwrite(A, sizeof(double), 2*dims[2]*dims[1]*dims[0], this2);
@@ -780,7 +802,7 @@ void ssfmprop(double complex *A, int *dims, int sst_on, double dzz, double *beta
     }
     free(A_nl);
     free(buffer);
-}      
+}
 
 void ionizpot(const char* gas, double *I1, double *I2) {
     
@@ -902,7 +924,7 @@ void Natoms(const char *gas, double *Natm, double *sigm_coll) {
 } 
 
 
-void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, double *tau_c, double *freeelectrons_sp) {
+void ioniz(complex_double *A, int *dims, double w0, double deltat, char* gas, double rho_c, double *w, double rho_nt, double n0, double *tau_c, double *freeelectrons_sp) {
 
     int i, k;
     double *Ip;
@@ -1034,7 +1056,7 @@ void ioniz(complex double *A, int *dims, double w0, double deltat, char* gas, do
     free(ions2);
 }
 
-void calcexpR(complex double *expR, int *signmem, double z, double Cav, double k0, double dzz, double *wr, int *dims) {
+void calcexpR(complex_double *expR, int *signmem, double z, double Cav, double k0, double dzz, double *wr, int *dims) {
     
     int signum, i;
     signum = ((int)(floor(z/Cav)+1) % 2)*2-1;   
@@ -1060,11 +1082,11 @@ void calcexpR(complex double *expR, int *signmem, double z, double Cav, double k
     //printf("Exitingggggg");
 }
 
-void fftshift(complex double *in, int *dims, complex double *buffer, int axis) {
+void fftshift(complex_double *in, int *dims, complex_double *buffer, int axis) {
     int i, j, k;
 
     if (axis==0) { //Special case for exp_D0
-        memcpy ( buffer, in, dims[2] * sizeof(complex double) );
+        memcpy ( buffer, in, dims[2] * sizeof(complex_double) );
         #pragma omp parallel for
         for (i=0; i<dims[2]/2; i++) {
             in[i] = buffer[dims[2]/2+i];
@@ -1072,7 +1094,7 @@ void fftshift(complex double *in, int *dims, complex double *buffer, int axis) {
         }
     }            
     else {
-        memcpy ( buffer, in, dims[0]*dims[1]*dims[2] * sizeof(complex double) );
+        memcpy ( buffer, in, dims[0]*dims[1]*dims[2] * sizeof(complex_double) );
         #pragma omp parallel num_threads(PROC) {
             if (axis==1) {
                 #pragma omp parallel for collapse(3)
@@ -1172,7 +1194,7 @@ void calc1oes (double *BP, int *dims, double *r, double *vald1oes, double *y) {
 
 void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR2fft, fftw_plan *pR2ifft, fftw_plan *pTfft, fftw_plan *pTifft) {
     
-    complex double *buffer;
+    complex_double *buffer;
     int howmany, istride, idist;
     int *inembed;
     int *length;
@@ -1206,7 +1228,7 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
     //const char* bop = "/reg/d/psdm/xpp/xpp12216/results/MCPdata/wisdom512";
     //fftw_import_wisdom_from_filename(bop);
    
-    buffer = (complex double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex double));
+    buffer = (complex_double *)malloc(dims[0]*dims[1]*dims[2] * sizeof(complex_double));
    
     dim[0].n = dims[0]; // An array of size rank, so always 1 in our case. This one is along dim0
     dim[0].is = 1;
@@ -1250,8 +1272,8 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
     howmany_dims[1].n = dims[1];
     howmany_dims[1].is =  dims[0];
     howmany_dims[1].os=  dims[0];
-    //memcpy(buffer, A, dims[2]*dims[1]*dims[0]* sizeof(complex double));
-    //memcpy(temp, expR, dims[0]* sizeof(complex double));
+    //memcpy(buffer, A, dims[2]*dims[1]*dims[0]* sizeof(complex_double));
+    //memcpy(temp, expR, dims[0]* sizeof(complex_double));
     *pTfft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
     *pTifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
     //*pTfft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_PATIENT);
@@ -1272,14 +1294,14 @@ void createPlans(int *dims, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR
     free(howmany_dims);
 }
 
-void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err) {
+void setStep(int *dims, double *dzz, complex_double *C1, complex_double *C2, double def_err, double dzmin, double *y1, double *y2, int *bad, double *err) {
    
     int i,j;
     double sum1, sum2, err_fact, ujdz;
-    //complex double *mC1, *mC2;
+    //complex_double *mC1, *mC2;
     
-    // mC1 = (complex double *)malloc(dims[0]*dims[1] * sizeof(complex double));
-    // mC2 = (complex double *)malloc(dims[0]*dims[1] * sizeof(complex double));
+    // mC1 = (complex_double *)malloc(dims[0]*dims[1] * sizeof(complex_double));
+    // mC2 = (complex_double *)malloc(dims[0]*dims[1] * sizeof(complex_double));
     
     *bad = 0;
     sum1 = 0;
@@ -1340,24 +1362,24 @@ void setStep(int *dims, double *dzz, double complex *C1, double complex *C2, dou
     //exit(0);
 }
 
-void sendmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankto) {
+void sendmpi(complex_double *A, MPI_Datatype datatype, int *dims, int rankto) {
     
-    int div, i, nchunk;
-    //div = 134217728;
-    div = 33554432/2;
-    nchunk = dims[0]*dims[1]*dims[2]/div;
-    if (nchunk<1) {
-        MPI_Send(A, dims[0]*dims[1]*dims[2], datatype, rankto, 0, MPI_COMM_WORLD);
+    /* approx 16 MB chunks */
+    int div = 33554432 / 2;
+    /* how many chunks */
+    int nchunk = dims[0] * dims[1] * dims[2] / div;
+    if (nchunk < 1) {
+        /* it fits in one send */
+        MPI_Send(A, dims[0] * dims[1] * dims[2], datatype, rankto, 0, MPI_COMM_WORLD);
     }
     else {
-        for (i=0;i<nchunk;i++) {
-            MPI_Send(A+i*div, dims[0]*dims[1]*dims[2]/nchunk, datatype, rankto, i, MPI_COMM_WORLD);
+        for (int i = 0; i < nchunk; ++i) {
+            MPI_Send(A + i * div, dims[0] * dims[1] * dims[2] / nchunk, datatype, rankto, i, MPI_COMM_WORLD);
         }
-        
     }
 }
 
-void recmpi(complex double *A, MPI_Datatype datatype, int *dims, int rankfrom) {
+void recmpi(complex_double *A, MPI_Datatype datatype, int *dims, int rankfrom) {
     int div, i, nchunk;
     //div = 134217728;
     div = 33554432/2;
