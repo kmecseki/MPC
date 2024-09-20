@@ -393,11 +393,11 @@ void main(int argc, char *argv[]) {
         }
         else {                
             /* advance doouble step for C1 */
-            ssfmpropCU(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
+            ssfmprop(C1, dims, sst_on, 2*dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
             
             /* advance single step twice for C2 */
-            ssfmpropCU(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
-            ssfmpropCU(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
+            ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
+            ssfmprop(C2, dims, sst_on, dzz, betas, alpha, &signmem, z, Cav, k0, wr, pR1fft, pR1ifft, pR2fft, pR2ifft, pTfft, pTifft, w, gamma2, w0, plasm, deltat, gas, rho_c, rho_nt, n0, &puls_e, r, BP1, BP2, y1, y2, &bps1, &bps2, Ab_M, 0, mpirank);
         }
 
         if (mpirank == 0) {
@@ -639,7 +639,7 @@ void ssfmprop(complex double *A, int *dims, int sst_on, double dzz, double *beta
     A_nl = (complex double *)malloc(dims[0] * dims[1] * dims[2] * sizeof(complex double));
     buffer = (complex double *)malloc(dims[0] * dims[1] * dims[2] * sizeof(complex double));
     
-    if (mpirank == 1 || mpirank == 3){
+    if (mpirank == 1 || mpirank == 3 || USEGPU){
         
         exp_D0 = (complex double*)malloc(dims[2] * sizeof(complex double));
         expR = (complex double*)malloc(dims[0] * sizeof(complex double));
@@ -1266,82 +1266,133 @@ void calc1oes (double *BP, int *dims, double *r, double *vald1oes, double *y) {
 
 void createPlans(int readwis, int *dims, const char* cpath, fftw_plan *pR1fft, fftw_plan *pR1ifft, fftw_plan *pR2fft, fftw_plan *pR2ifft, fftw_plan *pTfft, fftw_plan *pTifft) {
     
-    complex double *buffer;
-    int howmany, istride, idist, savewis=0;
-    int *inembed;
-    int *length;
-
-    fftw_iodim64 *dim=malloc(1 * sizeof(fftw_iodim64));
-    if (dim == NULL){fprintf(stderr,"malloc failed\n");exit(1);}
-    fftw_iodim64 *howmany_dims=malloc(2 * sizeof(fftw_iodim64));
-    if (howmany_dims == NULL){fprintf(stderr,"malloc failed\n"); exit(1);}
-    
-    int howmany_rank;
-   
     /* Reading in wisdom */
 
     int len = 80;
     char wispath[len];
     snprintf(wispath, lgt, "%s%d", cpath, dims[0]);
 
+    int safewis = 0;
     if (readwis) {
         if (!fftw_import_wisdom_from_filename(wispath)) {
             printf("Importing wisdom failed, creating new one to save.\n");
             savewis = 1;
         }
     }
-    
-    buffer  = (complex double *)malloc(dims[0] * dims[1] * dims[2] * sizeof(complex double));
-   
-    dim[0].n = dims[0]; // An array of size rank, so always 1 in this case. This one is along dim0
-    dim[0].is = 1;
-    dim[0].os = 1;
-    howmany_rank = 2;
-    howmany_dims[0].n = dims[1];
-    howmany_dims[0].is = dims[0];
-    howmany_dims[0].os = dims[0];
-    howmany_dims[1].n = dims[2];
-    howmany_dims[1].is = dims[1] * dims[0];
-    howmany_dims[1].os= dims[1] * dims[0];
 
-    *pR1fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
-    *pR1ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
-   
-    dim[0].n = dims[1];
-    dim[0].is =  dims[0];
-    dim[0].os =  dims[0];
-    howmany_rank = 2;
-    howmany_dims[0].n = dims[0];
-    howmany_dims[0].is = 1;
-    howmany_dims[0].os= 1;
-    howmany_dims[1].n = dims[2];
-    howmany_dims[1].is = dims[1] * dims[0];
-    howmany_dims[1].os= dims[1] * dims[0];
-   
-    *pR2fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
-    *pR2ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
-   
-    dim[0].n = dims[2];
-    dim[0].is =  dims[0] * dims[1];
-    dim[0].os =  dims[0] * dims[1];
-    howmany_rank = 2;
-    howmany_dims[0].n = dims[0];
-    howmany_dims[0].is = 1;
-    howmany_dims[0].os = 1;
-    howmany_dims[1].n = dims[1];
-    howmany_dims[1].is = dims[0];
-    howmany_dims[1].os = dims[0];
-    
-    *pTfft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
-    *pTifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
+    if (USEGPU) {
 
-    if ((savewis == 1) || (readwis == 0)) {
-        fftw_export_wisdom_to_filename(wispath);
+        /* direction is specified when the plan is executed */
+        // signal_no * idist + x * istride
+
+        int idist = dims[0]; //the distance between the first element of two consecutive signals in a batch of the input data.
+        int odist = dims[0];
+        int istride = 1; // the distance between two successive input elements
+        int ostride = 1;
+        int batch_size = dims[1] * dims[2];
+        //the storage dimensions of the output data
+        cufftPlanMany(&pR1fft, 1, &dims[0], &dims[0], istride, idist, &dims[0], ostride, odist, CUFFT_C2C, batch_size);
+        
+        idist = 1;
+        odist = 1;
+        istride = dims[1];
+        ostride = dims[1];
+        batch_size = dims[0] * dims[2];
+
+        cufftPlanMany(&pR2fft, 1, &dims[0], &dims[1], istride, idist, &dims[1], ostride, odist, CUFFT_C2C, batch_size);
+
+        idist = dims[1] * dims[0];
+        odist = dims[1] * dims[0];
+        istride = dims[1] * dims[0];
+        ostride = dims[1] * dims[0];
+        batch_size = dims[0] * dims[1];
+
+        cufftPlanMany(&pTfft, 1, &dims[0], &dims[2], istride, idist, &dims[2], ostride, odist, CUFFT_C2C, batch_size);
+
+
+int Nx = 128, Ny = 64, Nz = 32;
+int rank = 1;  // 1D FFT
+int n[1] = {Nz};  // FFT size along the third dimension
+
+int howmany = Nx * Ny;  // Total number of 1D FFTs to perform (one for each Nx × Ny slice)
+int istride = Nx * Ny, ostride = Nx * Ny;  // Stride between elements in input/output
+int idist = Nz, odist = Nz;    // Distance between slices in input/output
+int inembed[] = {Nz};          // Input data size
+int onembed[] = {Nz};  
+
+
+
+
+
+
+
+
+
+
+
+
     }
+    else {
 
-    free(buffer);
-    free(dim);
-    free(howmany_dims);
+        fftw_iodim64 *dim=malloc(1 * sizeof(fftw_iodim64));
+        if (dim == NULL){fprintf(stderr,"malloc failed\n");exit(1);}
+        fftw_iodim64 *howmany_dims=malloc(2 * sizeof(fftw_iodim64));
+        if (howmany_dims == NULL){fprintf(stderr,"malloc failed\n"); exit(1);}
+
+        complex double *buffer;
+        buffer  = (complex double *)malloc(dims[0] * dims[1] * dims[2] * sizeof(complex double));
+
+        int howmany_rank;
+        dim[0].n = dims[0]; // An array of size rank, so always 1 in this case. This one is along dim0
+        dim[0].is = 1;
+        dim[0].os = 1;
+        howmany_rank = 2;
+        howmany_dims[0].n = dims[1];
+        howmany_dims[0].is = dims[0];
+        howmany_dims[0].os = dims[0];
+        howmany_dims[1].n = dims[2];
+        howmany_dims[1].is = dims[1] * dims[0];
+        howmany_dims[1].os= dims[1] * dims[0];
+
+        *pR1fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
+        *pR1ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
+   
+        dim[0].n = dims[1];
+        dim[0].is =  dims[0];
+        dim[0].os =  dims[0];
+        howmany_rank = 2;
+        howmany_dims[0].n = dims[0];
+        howmany_dims[0].is = 1;
+        howmany_dims[0].os= 1;
+        howmany_dims[1].n = dims[2];
+        howmany_dims[1].is = dims[1] * dims[0];
+        howmany_dims[1].os= dims[1] * dims[0];
+   
+        *pR2fft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
+        *pR2ifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
+   
+        dim[0].n = dims[2];
+        dim[0].is =  dims[0] * dims[1];
+        dim[0].os =  dims[0] * dims[1];
+        howmany_rank = 2;
+        howmany_dims[0].n = dims[0];
+        howmany_dims[0].is = 1;
+        howmany_dims[0].os = 1;
+        howmany_dims[1].n = dims[1];
+        howmany_dims[1].is = dims[0];
+        howmany_dims[1].os = dims[0];
+    
+        *pTfft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_FORWARD, FFTW_MEASURE);
+        *pTifft = fftw_plan_guru64_dft(1, dim, howmany_rank, howmany_dims, buffer, buffer, FFTW_BACKWARD, FFTW_MEASURE);
+
+        if ((savewis == 1) || (readwis == 0)) {
+            fftw_export_wisdom_to_filename(wispath);
+        }
+
+        free(buffer);
+        free(dim);
+        free(howmany_dims);
+    }
 }
 
 
